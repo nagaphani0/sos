@@ -353,17 +353,16 @@ class SOS:
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         """Fetch a single page and extract IDs with exponential backoff.
 
-        Uses fast regex-based extraction for listing pages (much faster than full
-        BeautifulSoup parsing). Falls back to BeautifulSoup only when necessary.
-        Returns: (page_ids, has_next_page, success)
+        Returns: (page_ids, total_records, success)
         """
         # work on a copy so we don't mutate the caller's dict (thread-safe)
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
+        # print(f"Fetching page {page_number} with params: {local_params}")
 
         try:
-            response = self.session.post(
-                url,
+            response = self.session.get(
+                url+"Results",
                 params=local_params,
                 cookies=self.cookies,
                 headers=self.headers,
@@ -372,39 +371,40 @@ class SOS:
             )
 
             page_ids = []
-            has_next_page = False
+            total_records = None
 
             if response.status_code == 200:
                 text = response.text
 
-                # fast path: extract record ids with regex
-                found = self._ID_RE.findall(text)
-                if found:
-                    page_ids = found
+                # fallback to BeautifulSoup for odd HTML
+                soup = BeautifulSoup(text, 'html.parser')
+                links = soup.find_all('a', href=True)
+                for link in links:
+                    href = link['href']
+                    if 'id=' in href and 'Detail' in href:
+                        record_id = href.split('id=')[1].split('&')[0]
+                        page_ids.append(record_id)
+                
+                # Extract total records count using regex (faster) or soup
+                # <span class='TotalDisplayNum'>366</span>
+                total_re = re.search(r"class=['\"]TotalDisplayNum['\"][^>]*>(\d+)<", text, re.IGNORECASE)
+                if total_re:
+                    total_records = int(total_re.group(1))
                 else:
-                    # fallback to BeautifulSoup for odd HTML
-                    soup = BeautifulSoup(text, 'html.parser')
-                    links = soup.find_all('a', href=True)
-                    for link in links:
-                        href = link['href']
-                        if 'id=' in href and 'Detail' in href:
-                            record_id = href.split('id=')[1].split('&')[0]
-                            page_ids.append(record_id)
+                    # Try soup if regex failed
+                    try:
+                        if 'soup' not in locals():
+                            soup = BeautifulSoup(text, 'html.parser')
+                        total_span = soup.find('span', {'class': 'TotalDisplayNum'})
+                        if total_span:
+                            total_records = int(total_span.text.strip())
+                    except Exception:
+                        pass
 
-                # detect "Next" using BS4 (regex is unreliable for attributes with quotes)
-                try:
-                    # We reuse the soup from fallback if it was created, or create new one
-                    if 'soup' not in locals():
-                        soup = BeautifulSoup(text, 'html.parser')
-                    next_button = soup.find('a', {'class': 'page-link'}, string='Next')
-                    if next_button and next_button.get('href'):
-                        has_next_page = True
-                except Exception:
-                    has_next_page = False
-
-                # print(f"Page {page_number}: Found {len(page_ids)} IDs | Has Next: {has_next_page}")
                 print(f"Page {page_number}, ",end='', flush=True)
-                return page_ids, has_next_page, True
+                # print(f"Page Records:{page_ids}")
+
+                return page_ids, total_records, True
 
             # If status code is not 200, retry with backoff
             elif response.status_code == 429:
@@ -417,7 +417,7 @@ class SOS:
                     return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
                 else:
                     print(f"Page {page_number}: Failed after repeated 429s.")
-                    return [], False, False
+                    return [], None, False
 
             elif retry_count < max_retries:
                 wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 1)
@@ -426,7 +426,7 @@ class SOS:
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
             else:
                 print(f"Page {page_number}: Failed after {max_retries} retries. Status: {response.status_code}")
-                return [], False, False
+                return [], None, False
 
         except Exception as e:
             # Handle Timeout and ConnectionError aggressively
@@ -437,10 +437,10 @@ class SOS:
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
             else:
                 print(f"Page {page_number}: Error after {max_retries} retries: {e}")
-                return [], False, False
+                return [], None, False
 
     def get_all_ids(self, url, data, params):
-        """Fetch IDs from all pages using has_next_page flag"""
+        """Fetch IDs from all pages using TotalDisplayNum count"""
         ids = []
         seen_ids = set()  # track already collected IDs to avoid duplicates
         page_number = 1
@@ -448,80 +448,65 @@ class SOS:
         county_display = data.get('BirthCounty') or data.get('CountyName') or data.get('County') or ''
         print(f"current county: {county_display}")
 
-        # pass copies to avoid shared-state mutation across threads
-        page_ids, has_next, success = self._fetch_page(page_number, url, data.copy() if data else {}, params.copy() if params else {})
+        # Fetch First Page to get Total Records
+        page_ids, total_records, success = self._fetch_page(page_number, url, data.copy() if data else {}, params.copy() if params else {})
         
-        # if the very first page fails, we might as well abort or return what we have
         if not success:
             print(f"First page failed for {county_display}")
-            # Depending on desired behavior, could return empty or keep trying with other logic
-            # For now, let's just return what we have (empty)
             return ids
 
-        # only add new IDs not already seen — normalize and ignore empty/invalid values
+        # only add new IDs not already seen
         for raw_pid in page_ids:
             pid = str(raw_pid).strip()
-            if not pid:
-                continue
+            if not pid: continue
             if pid not in seen_ids:
                 ids.append(pid)
                 seen_ids.add(pid)
 
-        if not has_next or len(page_ids) == 0:
+        # Calculate Total Pages
+        import math
+        records_per_page = int(params.get('recordsPerPage', 50))
+        if total_records:
+            total_pages = math.ceil(total_records / records_per_page)
+            print(f"Total Records: {total_records} | Total Pages: {total_pages}")
+        else:
+            print("Could not find TotalDisplayNum. Defaulting to single page scrape (safe mode).")
+            # If we missed the regex, we could try falling back to 'Next' logic, but let's see. 
+            # Given the user's issue, 'safe mode' is better than 'infinite loop'.
+            total_pages = 1
+
+        if total_pages <= 1:
             print(f"Total IDs found: {len(ids)}")
             return ids
 
-        # Keep fetching pages with parallel workers until has_next_page is False
-        # Reduced max_workers to avoid 429s (Too Many Requests)
+        # Keep fetching pages with parallel workers until total_pages
         max_threads = 3
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            page_number = 2
             active_futures = {}
-            max_concurrent_pages = max_threads
+            
+            # Submit ALL remaining pages (2 to total_pages)
+            for p_num in range(2, total_pages + 1):
+                future = executor.submit(self._fetch_page, p_num, url, data.copy() if data else {}, params.copy() if params else {})
+                active_futures[future] = p_num
 
-            # Submit initial batch of pages
-            for _ in range(max_concurrent_pages):
-                future = executor.submit(self._fetch_page, page_number, url, data.copy() if data else {}, params.copy() if params else {})
-                active_futures[future] = page_number
-                page_number += 1
+            # Process results as they come in
+            for future in as_completed(active_futures):
+                p_num = active_futures[future]
+                try:
+                    p_ids, _, p_success = future.result() # ignore total_rec from sub-pages
+                    
+                    if p_success:
+                        for raw_pid in p_ids:
+                            pid = str(raw_pid).strip()
+                            if not pid: continue
+                            if pid not in seen_ids:
+                                ids.append(pid)
+                                seen_ids.add(pid)
+                    else:
+                        print(f"Page {p_num} FAILED completely.")
 
-            while active_futures:
-                for future in as_completed(active_futures):
-                    page_num = active_futures.pop(future)
-                    try:
-                        page_ids, has_next_page, success = future.result()
-                        
-                        if success:
-                            # only add new IDs not already seen — normalize and ignore empty/invalid values
-                            for raw_pid in page_ids:
-                                pid = str(raw_pid).strip()
-                                if not pid:
-                                    continue
-                                if pid not in seen_ids:
-                                    ids.append(pid)
-                                    seen_ids.add(pid)
-                            
-                            # If this page has next, submit the next page
-                            if has_next_page:
-                                new_future = executor.submit(self._fetch_page, page_number, url, data.copy() if data else {}, params.copy() if params else {})
-                                active_futures[new_future] = page_number
-                                page_number += 1
-                            else:
-                                for f, p_num in list(active_futures.items()):
-                                    if p_num > page_num:
-                                        f.cancel()
-                                        del active_futures[f]
-                        else:
-                            # If a page fails after all retries, we assume we might have reached the end or a hard continuous error.
-                            # Blindly skipping to the next page causes infinite loops if the "next" pages also error (e.g. 404/500).
-                            # So we just log it and stop this specific chain. 
-                            print(f"Page {page_num} FAILED completely. Stopping chain from this thread.")
-                            # We don't try to continue because we don't know if there IS a next page.
-                            # The loop will naturally drain.
-                            pass
-
-                    except Exception as e:
-                        print(f"Error processing page {page_num}: {e}")
+                except Exception as e:
+                    print(f"Error processing page {p_num}: {e}")
 
         # defensive final dedupe (preserve order) — protects against any accidental duplicates
         ordered = []
@@ -674,7 +659,7 @@ class SOS:
         else:
             self._append_rows_csv(data, filename)
 
-        print(f"Appended {len(data)} rows to {filename}")
+        # print(f"Appended {len(data)} rows to {filename}")
       
     def process_county_birth(self, county, max_workers_data=50, max_retries=5):
         """Process a single county: Fetch IDs, then fetch details, saving incrementally."""
@@ -702,10 +687,12 @@ class SOS:
             return
 
         # Save IDs immediately
-        self.export_data([(rid, county) for rid in ids], filename=f"Birth_{county}_ids.csv")
+        # self.export_data([(rid, county) for rid in ids], filename=f"Birth_{county}_ids.csv")
+        self.export_data([(rid, county) for rid in ids], filename=f"Birth_ids.csv")
         
         # Fetch Details
-        records_file = f"Birth_{county}_records.csv"
+        # records_file = f"Birth_{county}_records.csv"
+        records_file = f"Birth_records.csv"
         buffer = []
         
         with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
@@ -971,16 +958,21 @@ if __name__ == "__main__":
     sos = SOS()
 
     # Option 1: Scrape Birth records from all counties
-    sos.run_all_counties_birth(max_workers_counties=12,
-                               max_workers_data=30,
-                               max_retries=7)
+    # sos.run_all_counties_birth(max_workers_counties=12,
+    #                            max_workers_data=30,
+    #                            max_retries=7)
 
     # Option 2: Scrape Birth records from a single county
     # sos.run_birth(county='Douglas', max_workers=15)
      # sos.get_birth_data_by_id('121579','Birth')
 
+    # sos.process_county_birth(
+    # county='Douglas',
+    # max_workers_data=30,
+    # max_retries=7
+    # )
     sos.process_county_birth(
-    county='Douglas',
+    county='Clay',
     max_workers_data=30,
     max_retries=7
     )
