@@ -648,13 +648,14 @@ class SOS:
                 writer.writerows(rows)
         # dicts
         elif isinstance(first, dict):
-            fieldnames = list(first.keys())
-            with open(filename, 'a', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter='|')
-                if not file_exists:
-                    writer.writeheader()
-                for r in rows:
-                    writer.writerow(r)
+            # Using pandas is safer for variable keys in scraped data
+            df = pd.DataFrame(rows)
+            # If file exists, we append.
+            # Note: If new columns appear in later chunks that weren't in the first chunk, 
+            # they won't have a header in the CSV if the file already existed. 
+            # But this prevents crashing on "extra keys".
+            df.to_csv(filename, sep='|', mode='a', index=False, header=not file_exists)
+
         else:
             # fallback to pandas for unknown types
             df = pd.DataFrame(rows)
@@ -980,6 +981,7 @@ if __name__ == "__main__":
 
     # Option 2: Scrape Birth records from a single county
     # sos.run_birth(county='Douglas', max_workers=15)
+     # sos.get_birth_data_by_id('121579','Birth')
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
