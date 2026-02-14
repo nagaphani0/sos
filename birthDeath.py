@@ -391,17 +391,16 @@ class SOS:
                             record_id = href.split('id=')[1].split('&')[0]
                             page_ids.append(record_id)
 
-                # detect "Next" using regex (fast) then fallback to soup
-                if self._NEXT_RE.search(text):
-                    has_next_page = True
-                else:
-                    try:
+                # detect "Next" using BS4 (regex is unreliable for attributes with quotes)
+                try:
+                    # We reuse the soup from fallback if it was created, or create new one
+                    if 'soup' not in locals():
                         soup = BeautifulSoup(text, 'html.parser')
-                        next_button = soup.find('a', {'class': 'page-link'}, string='Next')
-                        if next_button and next_button.get('href'):
-                            has_next_page = True
-                    except Exception:
-                        has_next_page = False
+                    next_button = soup.find('a', {'class': 'page-link'}, string='Next')
+                    if next_button and next_button.get('href'):
+                        has_next_page = True
+                except Exception:
+                    has_next_page = False
 
                 # print(f"Page {page_number}: Found {len(page_ids)} IDs | Has Next: {has_next_page}")
                 print(f"Page {page_number}, ",end='', flush=True)
@@ -507,21 +506,18 @@ class SOS:
                                 new_future = executor.submit(self._fetch_page, page_number, url, data.copy() if data else {}, params.copy() if params else {})
                                 active_futures[new_future] = page_number
                                 page_number += 1
-                            # If this page has no next, and it successfuly loaded, it's the last page.
                             else:
                                 for f, p_num in list(active_futures.items()):
                                     if p_num > page_num:
                                         f.cancel()
                                         del active_futures[f]
-                                pass
                         else:
-                            # If a page fails even after all retries, we risk breaking the chain.
-                            # We should try to skip it and continue, assuming the next page might work.
-                            # But only if we haven't seen an end signal from other pages.
-                            print(f"Page {page_num} FAILED completely. Attempting to skip to next page...")
-                            new_future = executor.submit(self._fetch_page, page_number, url, data.copy() if data else {}, params.copy() if params else {})
-                            active_futures[new_future] = page_number
-                            page_number += 1
+                            # If a page fails after all retries, we assume we might have reached the end or a hard continuous error.
+                            # Blindly skipping to the next page causes infinite loops if the "next" pages also error (e.g. 404/500).
+                            # So we just log it and stop this specific chain. 
+                            print(f"Page {page_num} FAILED completely. Stopping chain from this thread.")
+                            # We don't try to continue because we don't know if there IS a next page.
+                            # The loop will naturally drain.
                             pass
 
                     except Exception as e:
@@ -982,6 +978,12 @@ if __name__ == "__main__":
     # Option 2: Scrape Birth records from a single county
     # sos.run_birth(county='Douglas', max_workers=15)
      # sos.get_birth_data_by_id('121579','Birth')
+
+    sos.process_county_birth(
+    county='Douglas',
+    max_workers_data=30,
+    max_retries=7
+    )
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
