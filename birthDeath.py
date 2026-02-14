@@ -350,7 +350,7 @@ class SOS:
     _ID_RE = re.compile(r'Detail[^"]*?\bid=(\d+)', re.IGNORECASE)
     _NEXT_RE = re.compile(r'page-link[^"]*>\s*Next\s*<', re.IGNORECASE)
 
-    def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=5):
+    def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         """Fetch a single page and extract IDs with exponential backoff.
 
         Uses fast regex-based extraction for listing pages (much faster than full
@@ -368,7 +368,7 @@ class SOS:
                 cookies=self.cookies,
                 headers=self.headers,
                 data=data,
-                timeout=30
+                timeout=60
             )
 
             page_ids = []
@@ -410,8 +410,9 @@ class SOS:
             # If status code is not 200, retry with backoff
             elif response.status_code == 429:
                 # 429 Too Many Requests - specific handling
-                if retry_count < max_retries + 5: # Allow more retries for 429
-                    wait_time = 30 + (2 ** retry_count) + random.uniform(0, 5)
+                # Retry almost indefinitely for 429s (up to max_retries + 20)
+                if retry_count < max_retries + 20: 
+                    wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10) # Cap exp backoff at 64s + 30s
                     print(f"Page {page_number}: Hit Rate Limit (429). Sleeping {wait_time:.2f}s... (Attempt {retry_count + 1})")
                     time.sleep(wait_time)
                     return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
@@ -420,7 +421,7 @@ class SOS:
                     return [], False, False
 
             elif retry_count < max_retries:
-                wait_time = (2 ** retry_count) + random.uniform(0, 1)
+                wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 1)
                 print(f"Page {page_number}: Status {response.status_code}. Retrying in {wait_time:.2f}s (Attempt {retry_count + 1}/{max_retries})")
                 time.sleep(wait_time)
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
@@ -429,9 +430,10 @@ class SOS:
                 return [], False, False
 
         except Exception as e:
+            # Handle Timeout and ConnectionError aggressively
             if retry_count < max_retries:
-                wait_time = (2 ** retry_count) + random.uniform(0, 1)
-                print(f"Page {page_number}: Error - {e}. Retrying in {wait_time:.2f}s (Attempt {retry_count + 1}/{max_retries})")
+                wait_time = (2 ** min(retry_count, 6)) + random.uniform(5, 10) # Longer base wait for connection issues
+                print(f"Page {page_number}: Network Error - {e}. Retrying in {wait_time:.2f}s (Attempt {retry_count + 1}/{max_retries})")
                 time.sleep(wait_time)
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
             else:
@@ -472,7 +474,7 @@ class SOS:
 
         # Keep fetching pages with parallel workers until has_next_page is False
         # Reduced max_workers to avoid 429s (Too Many Requests)
-        max_threads = 5 
+        max_threads = 3
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
             page_number = 2
             active_futures = {}
@@ -506,38 +508,20 @@ class SOS:
                                 active_futures[new_future] = page_number
                                 page_number += 1
                             # If this page has no next, and it successfuly loaded, it's the last page.
-                            # We can stop submitting new pages and cancel pending ones that are likely out of range.
                             else:
-                                # We found the valid end of pagination.
-                                # Cancel "future" pages that are likely invalid (anything > page_num)
-                                # But let's be careful. If we pre-fetched 2-21, and page 10 says "Stop", 
-                                # pages 11-21 are invalid. 
                                 for f, p_num in list(active_futures.items()):
                                     if p_num > page_num:
                                         f.cancel()
                                         del active_futures[f]
-                                # We don't break immediately because some earlier pages might still be processing?
-                                # Actually, as_completed yields as they finish. 
-                                # If page 10 says stop, but page 9 is still running, we should let it finish.
-                                # But we should NOT submit any MORE pages.
-                                # To stop submitting, we just don't add new futures.
-                                # And we've cancelled the future ones.
-                                # So just continue to drain the pool.
                                 pass
                         else:
-                            print(f"Failed to fetch page {page_num} after retries.")
-                            # On failure, do NOT stop everything. Just don't queue new pages from this specific branch.
-                            # But since we have a shared 'page_number' counter, if we don't queue here, 
-                            # we rely on other successful pages to keep the queue alive?
-                            # Not really. Concurrency 'max_concurrent_pages' was just for startup.
-                            # The loop logic is: 1 success -> 1 new submission.
-                            # If a page fails, we lose a "slot" in the pipeline.
-                            # If many fail, the pipeline drains and stops. 
-                            # We should probably replenish the slot if we suspect there are more pages.
-                            # But without 'has_next', we don't know. 
-                            # However, if we are at page 5 (failed) and 6 (success, has_next=True), 
-                            # then 6 will trigger 22 (or whatever next).
-                            # So as long as *some* pages succeed, the crawler continues.
+                            # If a page fails even after all retries, we risk breaking the chain.
+                            # We should try to skip it and continue, assuming the next page might work.
+                            # But only if we haven't seen an end signal from other pages.
+                            print(f"Page {page_num} FAILED completely. Attempting to skip to next page...")
+                            new_future = executor.submit(self._fetch_page, page_number, url, data.copy() if data else {}, params.copy() if params else {})
+                            active_futures[new_future] = page_number
+                            page_number += 1
                             pass
 
                     except Exception as e:
