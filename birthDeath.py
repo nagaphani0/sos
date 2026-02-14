@@ -408,6 +408,17 @@ class SOS:
                 return page_ids, has_next_page, True
 
             # If status code is not 200, retry with backoff
+            elif response.status_code == 429:
+                # 429 Too Many Requests - specific handling
+                if retry_count < max_retries + 5: # Allow more retries for 429
+                    wait_time = 30 + (2 ** retry_count) + random.uniform(0, 5)
+                    print(f"Page {page_number}: Hit Rate Limit (429). Sleeping {wait_time:.2f}s... (Attempt {retry_count + 1})")
+                    time.sleep(wait_time)
+                    return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
+                else:
+                    print(f"Page {page_number}: Failed after repeated 429s.")
+                    return [], False, False
+
             elif retry_count < max_retries:
                 wait_time = (2 ** retry_count) + random.uniform(0, 1)
                 print(f"Page {page_number}: Status {response.status_code}. Retrying in {wait_time:.2f}s (Attempt {retry_count + 1}/{max_retries})")
@@ -460,10 +471,12 @@ class SOS:
             return ids
 
         # Keep fetching pages with parallel workers until has_next_page is False
-        with ThreadPoolExecutor(max_workers=20) as executor:
+        # Reduced max_workers to avoid 429s (Too Many Requests)
+        max_threads = 5 
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
             page_number = 2
             active_futures = {}
-            max_concurrent_pages = 20
+            max_concurrent_pages = max_threads
 
             # Submit initial batch of pages
             for _ in range(max_concurrent_pages):
