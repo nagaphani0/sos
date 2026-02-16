@@ -36,10 +36,6 @@ class SOS:
         self.land_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Land/'
         self.naturalization_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Naturalization'
 
-        # self.session = requests.Session()
-        # self.session.headers.update(self.headers)
-        # self.session.cookies.update(self.cookies)
-
         # single headers declaration
         self.headers = {
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
@@ -340,7 +336,9 @@ class SOS:
             'BirthCounty': '',
             'BirthNameSearch': '',
             'BirthSubmit': 'Search',
+            '__ncforminfo': 'QQGzh8actEkVswURTyIRLqske4Sxcsi-akMT1fROk56vuINWbFjp-FoGkNhWeMqbH7uAql7GAbZP6d3v4rMFI-RPhop0-HnbsWAMeW_zE_v2jbjqaH273g==',
         }
+ 
         self.birth_params = {
             'PageNumber': '',
             'recordsPerPage': '50'
@@ -357,26 +355,32 @@ class SOS:
         """
         # work on a copy so we don't mutate the caller's dict (thread-safe)
         local_params = params.copy() if params is not None else {}
+
         local_params['PageNumber'] = str(page_number)
         # print(f"Fetching page {page_number} with params: {local_params}")
-
+  
         try:
+            # data['BirthCounty'] = county
+            
+            self.session.post(
+                    self.birth_url,
+                    cookies=self.cookies,
+                    headers=self.headers,
+                    data=data,
+                    timeout=60
+                )
             response = self.session.get(
-                url+"Results",
+                url+'Results',
                 params=local_params,
                 cookies=self.cookies,
                 headers=self.headers,
-                data=data,
                 timeout=60
             )
-
             page_ids = []
             total_records = None
 
             if response.status_code == 200:
                 text = response.text
-
-                # fallback to BeautifulSoup for odd HTML
                 soup = BeautifulSoup(text, 'html.parser')
                 links = soup.find_all('a', href=True)
                 for link in links:
@@ -385,13 +389,10 @@ class SOS:
                         record_id = href.split('id=')[1].split('&')[0]
                         page_ids.append(record_id)
                 
-                # Extract total records count using regex (faster) or soup
-                # <span class='TotalDisplayNum'>366</span>
                 total_re = re.search(r"class=['\"]TotalDisplayNum['\"][^>]*>(\d+)<", text, re.IGNORECASE)
                 if total_re:
                     total_records = int(total_re.group(1))
                 else:
-                    # Try soup if regex failed
                     try:
                         if 'soup' not in locals():
                             soup = BeautifulSoup(text, 'html.parser')
@@ -401,9 +402,10 @@ class SOS:
                     except Exception:
                         pass
 
-                print(f"Page {page_number}, ",end='', flush=True)
+                print(f"Page {page_number}",end='', flush=True)
                 # print(f"Page Records:{page_ids}")
 
+                # print(f"Records:{page_ids}")
                 return page_ids, total_records, True
 
             # If status code is not 200, retry with backoff
@@ -444,11 +446,7 @@ class SOS:
         ids = []
         seen_ids = set()  # track already collected IDs to avoid duplicates
         page_number = 1
-        # avoid KeyError when data may not include 'BirthCounty'
-        county_display = data.get('BirthCounty') or data.get('CountyName') or data.get('County') or ''
-        print(f"current county: {county_display}")
 
-        # Fetch First Page to get Total Records
         page_ids, total_records, success = self._fetch_page(page_number, url, data.copy() if data else {}, params.copy() if params else {})
         
         if not success:
@@ -468,7 +466,7 @@ class SOS:
         records_per_page = int(params.get('recordsPerPage', 50))
         if total_records:
             total_pages = math.ceil(total_records / records_per_page)
-            print(f"Total Records: {total_records} | Total Pages: {total_pages}")
+            print(f"county {data['BirthCounty']} Total Records: {total_records} | Total Pages: {total_pages}")
         else:
             print("Could not find TotalDisplayNum. Defaulting to single page scrape (safe mode).")
             # If we missed the regex, we could try falling back to 'Next' logic, but let's see. 
@@ -480,33 +478,23 @@ class SOS:
             return ids
 
         # Keep fetching pages with parallel workers until total_pages
-        max_threads = 3
-        with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            active_futures = {}
-            
-            # Submit ALL remaining pages (2 to total_pages)
-            for p_num in range(2, total_pages + 1):
-                future = executor.submit(self._fetch_page, p_num, url, data.copy() if data else {}, params.copy() if params else {})
-                active_futures[future] = p_num
+        # Fetch remaining pages sequentially
+        for p_num in range(2, total_pages + 1):
+            try:
+                p_ids, _, p_success = self._fetch_page(p_num, url, data.copy() if data else {}, params.copy() if params else {})
+                
+                if p_success:
+                    for raw_pid in p_ids:
+                        pid = str(raw_pid).strip()
+                        if not pid: continue
+                        if pid not in seen_ids:
+                            ids.append(pid)
+                            seen_ids.add(pid)
+                else:
+                    print(f"Page {p_num} FAILED completely.")
 
-            # Process results as they come in
-            for future in as_completed(active_futures):
-                p_num = active_futures[future]
-                try:
-                    p_ids, _, p_success = future.result() # ignore total_rec from sub-pages
-                    
-                    if p_success:
-                        for raw_pid in p_ids:
-                            pid = str(raw_pid).strip()
-                            if not pid: continue
-                            if pid not in seen_ids:
-                                ids.append(pid)
-                                seen_ids.add(pid)
-                    else:
-                        print(f"Page {p_num} FAILED completely.")
-
-                except Exception as e:
-                    print(f"Error processing page {p_num}: {e}")
+            except Exception as e:
+                print(f"Error processing page {p_num}: {e}")
 
         # defensive final dedupe (preserve order) — protects against any accidental duplicates
         ordered = []
@@ -660,14 +648,16 @@ class SOS:
             self._append_rows_csv(data, filename)
 
         # print(f"Appended {len(data)} rows to {filename}")
-      
+
+
     def process_county_birth(self, county, max_workers_data=50, max_retries=5):
         """Process a single county: Fetch IDs, then fetch details, saving incrementally."""
         local_data = self.birth_data.copy()
-        local_data['BirthCounty'] = county
         local_params = self.birth_params.copy()
+        local_data['BirthCounty'] = county
 
         ids = []
+
         # Retry logic for fetching IDs
         for attempt in range(max_retries + 1):
             try:
@@ -698,21 +688,21 @@ class SOS:
         with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
             future_to_id = {executor.submit(self.get_birth_data_by_id, record_id, 'Birth'): record_id for record_id in ids}
             
-            with tqdm(total=len(ids), desc=f"Birth - {county}", unit="id") as pbar:
-                for future in as_completed(future_to_id):
-                    try:
-                        rec = future.result()
-                        if isinstance(rec, dict):
-                            rec['source_county'] = county
-                        buffer.append(rec)
-                        
-                        if len(buffer) >= 200:
-                            self.export_data(buffer, filename=records_file)
-                            buffer = []
-                    except Exception as e:
-                        pass
-                    finally:
-                        pbar.update(1)
+        with tqdm(total=len(ids), desc=f"Birth - {county}", unit="id") as pbar:
+            for future in as_completed(future_to_id):
+                try:
+                    rec = future.result()
+                    if isinstance(rec, dict):
+                        rec['source_county'] = county
+                    buffer.append(rec)
+                    
+                    if len(buffer) >= 200:
+                        self.export_data(buffer, filename=records_file)
+                        buffer = []
+                except Exception as e:
+                    pass
+                finally:
+                    pbar.update(1)
         
         # Final flush
         if buffer:
@@ -777,19 +767,11 @@ class SOS:
         print(f"Starting parallel scrape for {len(self.all_counties)} counties")
         print(f"{'='*60}\n")
 
-        with ThreadPoolExecutor(max_workers=max_workers_counties) as executor:
-            # Submit all counties
-            future_to_county = {
-                executor.submit(self.process_county_birth, county, max_workers_data, max_retries): county 
-                for county in self.all_counties
-            }
-            
-            for future in as_completed(future_to_county):
-                county = future_to_county[future]
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"County {county} generated an exception: {e}")
+        for county in self.all_counties:
+            try:
+                self.process_county_birth(county, max_workers_data, max_retries)
+            except Exception as e:
+                print(f"County {county} generated an exception: {e}")
 
         print(f"\n{'='*60}")
         print("All counties processed.")
@@ -958,24 +940,24 @@ if __name__ == "__main__":
     sos = SOS()
 
     # Option 1: Scrape Birth records from all counties
-    # sos.run_all_counties_birth(max_workers_counties=12,
-    #                            max_workers_data=30,
-    #                            max_retries=7)
+    # Limit to 3 counties for testing
+
+    # sos.all_counties = sos.all_counties[0:3]
+    # sos.all_counties = ['Douglas','Clay']
+    sos.run_all_counties_birth(max_workers_counties=12,
+                               max_workers_data=30,
+                               max_retries=7)
 
     # Option 2: Scrape Birth records from a single county
     # sos.run_birth(county='Douglas', max_workers=15)
      # sos.get_birth_data_by_id('121579','Birth')
-
-    # sos.process_county_birth(
-    # county='Douglas',
-    # max_workers_data=30,
-    # max_retries=7
-    # )
-    sos.process_county_birth(
-    county='Clay',
-    max_workers_data=30,
-    max_retries=7
-    )
+    
+    # for i in ['Douglas','Clay']:
+    #     sos.process_county_birth(
+    #     county=i,
+    #     max_workers_data=30,
+    #     max_retries=7
+    #     )
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
