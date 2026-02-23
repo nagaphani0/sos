@@ -72,48 +72,41 @@ def fetch_page_html(url: str,counties:str,post=False, max_retries: int = 5) -> s
             html = page.content()
 
             if post:
-                print('in post')
-                soup = BeautifulSoup(html, "html.parser")
-                nc_input = soup.find("input", {"name": "__ncforminfo"})
-                if not nc_input:
-                    print("❌ __ncforminfo not found")
-                    browser.close()
-                    continue
+                print("Submitting form like real browser...")
 
-                nc_value = nc_input.get("value")
+                # Select county dropdown
+                page.select_option("select[#BirthCounty]", counties)
 
-                print("🔑 Found __ncforminfo for Search",nc_value)
+                # (optional) fill name search
+                # page.fill("input[name='BirthNameSearch']", "")
 
-                response = context.request.post(
-                url,
-                headers={
-                    "content-type": "application/x-www-form-urlencoded",
-                    "origin": "https://s1.sos.mo.gov",
-                    "referer": url
-                },
-                form={
-                    "BirthCounty": counties,
-                    "BirthNameSearch": "",
-                    "BirthSubmit": "Search",
-                    "__ncforminfo": nc_value
-                }
-                )
-                post_html = response.text()
-                if "Just a moment" not in post_html:
-                    print("✅ POST Success")
+                # Click submit button
+                page.click("input[name='BirthSubmit'], #btnSearchBirth")
+
+                # Wait for navigation after form submit
+                page.wait_for_load_state("domcontentloaded")
+                page.wait_for_timeout(5000)
+
+                post_html = page.content()
+
+                if not is_cloudflare_blocked(post_html):
+                    print("✅ POST Success via real browser submit")
                     browser.close()
                     return post_html
 
-            # 🔎 Show response headers
-            if response:
-                print("📦 Response Headers:")
-                for key, value in response.headers.items():
-                    print(f"{key}: {value}")
+                print("⚠ Cloudflare triggered after submit")
 
-            if not is_cloudflare_blocked(html):
+
+            # 🔎 Show response headers
+            # if response:
+            #     print("📦 Response Headers:")
+            #     for key, value in response.headers.items():
+            #         print(f"{key}: {value}")
+
+            if not is_cloudflare_blocked(post_html):
                 print("✅ Successfully fetched page!")
                 browser.close()
-                return html
+                return post_html
 
             print("⚠ Cloudflare detected. Retrying with new IP...")
             browser.close()

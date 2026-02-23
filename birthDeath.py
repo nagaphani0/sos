@@ -52,7 +52,15 @@ class SOS:
         self.session.mount('https://', adapter)
         self.session.mount('http://', adapter)
         self.session.headers.update(self.headers)
+        self.death_data = {
+            'DeathCounty': '',
+            'DeathNameSearch': '',
+            'DeathSubmit': 'Search',
+            # '__ncforminfo': 't-Hg9mr_FNwXJJin8XMh4m0jckjliJm8EjF6NJtitEgM__JvbscddmjXlPTXuyx1hyhHr0AqgrVdlYEDeJPH-PauvqBqNiAFO58Pucl_0fgeZodE8OS-Ow==',
+        }
+
         # load cookies into session if present
+
         try:
             self.session.cookies.update(self.cookies)
         except Exception:
@@ -87,11 +95,6 @@ class SOS:
                 '__ncforminfo': 'S8APkqWjB7tvVNi0TzG0oZFvp95_38h1Hs8uqsGUyl-Ey2p_r8gd9EMUJk3soWTZ2Pu6d3Ut1kyVDXDgYQBelcpUeo0mknfSdzR_WkyXRbVhghKZU6hyV-wYEqLjHTaIqL_R7ZDiPiDG_0Ez6yTgEV0yrdO6Xty0xpb-akoEQi3gL-xXOpc03RmbB_YAEVjaSchktD6w7ibPu4l2YOOK3EZZrYf7Z5lJed00NKhVEoHC_6EcFw90oQKtm6LUEZ5utMvxFuHMf2cbHIQN5BNB2Q==',
             }
 
-
-        self.page_params = {
-            'PageNumber': '',
-            'recordsPerPage': '75'
-        }
         # MySQL database configuration
         self.db_config = {
             'host': 'localhost',
@@ -99,9 +102,25 @@ class SOS:
             'password': '',
             'database': 'test'
         }
+        self.all_death_counties=[
+        "Adair", "Andrew", "Audrain", "Barry", "Barton", "Bates", "Benton",
+        "Bollinger", "Buchanan", "Butler", "Callaway", "Cape Girardeau",
+        "Carroll", "Cass", "Cedar", "Chariton", "Clark", "Clay", "Clinton",
+        "Cole", "Cooper", "Dade", "Dallas", "Daviess", "Dent", "Douglas",
+        "Franklin", "Gasconade", "Gentry", "Greene", "Grundy", "Harrison",
+        "Hickory", "Holt", "Howard", "Howell", "Iron", "Jackson", "Jasper",
+        "Jefferson", "Johnson", "Knox", "Lawrence", "Lewis", "Lincoln",
+        "Linn", "Livingston", "Macon", "Madison", "Maries", "Marion",
+        "Mercer", "Miller", "Moniteau", "Monroe", "Morgan", "Newton",
+        "Nodaway", "Oregon", "Osage", "Ozark", "Perry", "Phelps", "Platte",
+        "Polk", "Ralls", "Ray", "Reynolds", "Ripley", "Sainte Genevieve",
+        "Saline", "Schuyler", "Scotland", "Scott", "Shelby", "St. Clair",
+        "St. Francois", "St. Louis", "St. Louis City", "Ste. Genevieve",
+        "Sullivan", "Texas", "Vernon", "Warren", "Washington", "Webster",
+        "Worth"
+        ]
 
-
-        self.all_counties = [
+        self.all_birth_counties = [
             "Adair",
             "Andrew",
             "Atchison",
@@ -343,25 +362,28 @@ class SOS:
             'PageNumber': '',
             'recordsPerPage': '50'
         }
+
+        self.birth_output_columns = [
+            "id", "type", "County", "Roll Number", "Page", "Number", 
+            "Date of Return (Month/Day/Year)", "Name of Child", "Sex", 
+            "No. of Child of this Mother", "Race or Color", "Date of Birth", 
+            "Place of Birth", "Nationality of Father", "Father's Place of Birth", 
+            "Father's Age", "Nationality of Mother", "Mother's Place of Birth", 
+            "Mother's Age", "Full Name of Mother", "Maiden Name of Mother", 
+            "Residence of Mother", "Full Name of Father", "Father's Occupation", 
+            "Name and Address of Medical Attendant", 
+            "Name and Address of Person making Certificate", "Returned by", 
+            "NOTE", "source_county"
+        ]
         
     # pre-compiled regexes (faster than parsing when possible)
-    _ID_RE = re.compile(r'Detail[^"]*?\bid=(\d+)', re.IGNORECASE)
     _NEXT_RE = re.compile(r'page-link[^"]*>\s*Next\s*<', re.IGNORECASE)
 
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
-        """Fetch a single page and extract IDs with exponential backoff.
-
-        Returns: (page_ids, total_records, success)
-        """
-        # work on a copy so we don't mutate the caller's dict (thread-safe)
         local_params = params.copy() if params is not None else {}
-
         local_params['PageNumber'] = str(page_number)
-        # print(f"Fetching page {page_number} with params: {local_params}")
-  
+        page_ids = []
         try:
-            # data['BirthCounty'] = county
-            
             self.session.post(
                     self.birth_url,
                     cookies=self.cookies,
@@ -370,143 +392,85 @@ class SOS:
                     timeout=60
                 )
             response = self.session.get(
-                url+'Results',
+                url + 'Results',
                 params=local_params,
                 cookies=self.cookies,
                 headers=self.headers,
                 timeout=60
             )
-            page_ids = []
-            total_records = None
-
             if response.status_code == 200:
                 text = response.text
+
                 soup = BeautifulSoup(text, 'html.parser')
+                has_next =True if soup.find("a", class_="page-link", string="Next") else False 
+
                 links = soup.find_all('a', href=True)
                 for link in links:
                     href = link['href']
                     if 'id=' in href and 'Detail' in href:
                         record_id = href.split('id=')[1].split('&')[0]
                         page_ids.append(record_id)
-                
-                total_re = re.search(r"class=['\"]TotalDisplayNum['\"][^>]*>(\d+)<", text, re.IGNORECASE)
-                if total_re:
-                    total_records = int(total_re.group(1))
-                else:
-                    try:
-                        if 'soup' not in locals():
-                            soup = BeautifulSoup(text, 'html.parser')
-                        total_span = soup.find('span', {'class': 'TotalDisplayNum'})
-                        if total_span:
-                            total_records = int(total_span.text.strip())
-                    except Exception:
-                        pass
 
-                print(f"Page {page_number}",end='', flush=True)
-                # print(f"Page Records:{page_ids}")
+
+                
+                # print('page ids',page_ids)
+
+                # total_re = re.search(r"class=['\"]TotalDisplayNum['\"][^>]*>(\d+)<", text, re.IGNORECASE)
+                # if total_re:
+                #     total_records = int(total_re.group(1))
+                # else:
+                #     try:
+                #         if 'soup' not in locals():
+                #             soup = BeautifulSoup(text, 'html.parser')
+                #         total_span = soup.find('span', {'class': 'TotalDisplayNum'})
+                #         if total_span:
+                #             total_records = int(total_span.text.strip())
+                #             print('total records',total_records)
+                #     except Exception:
+                #         pass
 
                 # print(f"Records:{page_ids}")
-                return page_ids, total_records, True
 
-            # If status code is not 200, retry with backoff
-            elif response.status_code == 429:
-                # 429 Too Many Requests - specific handling
-                # Retry almost indefinitely for 429s (up to max_retries + 20)
-                if retry_count < max_retries + 20: 
-                    wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10) # Cap exp backoff at 64s + 30s
-                    print(f"Page {page_number}: Hit Rate Limit (429). Sleeping {wait_time:.2f}s... (Attempt {retry_count + 1})")
-                    time.sleep(wait_time)
-                    return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
-                else:
-                    print(f"Page {page_number}: Failed after repeated 429s.")
-                    return [], None, False
+                print(f"Page {page_number}",end='', flush=True)
+                return page_ids, has_next, True
+
+            elif response.status_code == 429 and retry_count < max_retries + 20:
+                wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10)
+                time.sleep(wait_time)
+                return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
 
             elif retry_count < max_retries:
                 wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 1)
-                print(f"Page {page_number}: Status {response.status_code}. Retrying in {wait_time:.2f}s (Attempt {retry_count + 1}/{max_retries})")
                 time.sleep(wait_time)
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
-            else:
-                print(f"Page {page_number}: Failed after {max_retries} retries. Status: {response.status_code}")
-                return [], None, False
+            
+            return [], False, False
 
         except Exception as e:
-            # Handle Timeout and ConnectionError aggressively
             if retry_count < max_retries:
-                wait_time = (2 ** min(retry_count, 6)) + random.uniform(5, 10) # Longer base wait for connection issues
-                print(f"Page {page_number}: Network Error - {e}. Retrying in {wait_time:.2f}s (Attempt {retry_count + 1}/{max_retries})")
-                time.sleep(wait_time)
+                time.sleep((2 ** min(retry_count, 6)) + 5)
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
-            else:
-                print(f"Page {page_number}: Error after {max_retries} retries: {e}")
-                return [], None, False
+            return [], False, False
 
     def get_all_ids(self, url, data, params):
-        """Fetch IDs from all pages using TotalDisplayNum count"""
-        ids = []
-        seen_ids = set()  # track already collected IDs to avoid duplicates
-        page_number = 1
-
-        page_ids, total_records, success = self._fetch_page(page_number, url, data.copy() if data else {}, params.copy() if params else {})
+        """Fetch IDs sequentially until no 'Next' link is found"""
+        all_ids = []
+        seen_ids = set()
+        current_page = 1
         
-        if not success:
-            print(f"First page failed for {county_display}")
-            return ids
-
-        # only add new IDs not already seen
-        for raw_pid in page_ids:
-            pid = str(raw_pid).strip()
-            if not pid: continue
-            if pid not in seen_ids:
-                ids.append(pid)
-                seen_ids.add(pid)
-
-        # Calculate Total Pages
-        import math
-        records_per_page = int(params.get('recordsPerPage', 50))
-        if total_records:
-            total_pages = math.ceil(total_records / records_per_page)
-            print(f"county {data['BirthCounty']} Total Records: {total_records} | Total Pages: {total_pages}")
-        else:
-            print("Could not find TotalDisplayNum. Defaulting to single page scrape (safe mode).")
-            # If we missed the regex, we could try falling back to 'Next' logic, but let's see. 
-            # Given the user's issue, 'safe mode' is better than 'infinite loop'.
-            total_pages = 1
-
-        if total_pages <= 1:
-            print(f"Total IDs found: {len(ids)}")
-            return ids
-
-        # Keep fetching pages with parallel workers until total_pages
-        # Fetch remaining pages sequentially
-        for p_num in range(2, total_pages + 1):
-            try:
-                p_ids, _, p_success = self._fetch_page(p_num, url, data.copy() if data else {}, params.copy() if params else {})
+        while True:
+            page_ids, has_next, success = self._fetch_page(
+                current_page, 
+                url, 
+                data.copy() if data else {}, 
+                params.copy() if params else {}
+            )
+            all_ids.extend(page_ids)
+            current_page+=1
+            
+            if not has_next:
+                return all_ids
                 
-                if p_success:
-                    for raw_pid in p_ids:
-                        pid = str(raw_pid).strip()
-                        if not pid: continue
-                        if pid not in seen_ids:
-                            ids.append(pid)
-                            seen_ids.add(pid)
-                else:
-                    print(f"Page {p_num} FAILED completely.")
-
-            except Exception as e:
-                print(f"Error processing page {p_num}: {e}")
-
-        # defensive final dedupe (preserve order) — protects against any accidental duplicates
-        ordered = []
-        seen_final = set()
-        for pid in ids:
-            if pid not in seen_final:
-                ordered.append(pid)
-                seen_final.add(pid)
-        ids = ordered
-
-        print(f"Total IDs found: {len(ids)}")
-        return ids
 
     def get_land_and_naturalization_data_by_id(self, url, record_id):
 
@@ -564,7 +528,7 @@ class SOS:
             headers=self.headers,
         )
 
-    # Assuming 'html_content' is the HTML string you provided
+        # Assuming 'html_content' is the HTML string you provided
         soup = BeautifulSoup(response.text, 'html.parser')
 
         data = {}
@@ -579,24 +543,59 @@ class SOS:
 
             heads = rows[0].find_all(["th", "td"])
             vals  = rows[1].find_all("td")
+            
+            # Context state to disambiguate 'Age', 'Place of Birth' across columns (e.g. Father vs Mother)
+            current_context = "" 
 
             for h, v in zip(heads, vals):
+                header_text = h.get_text(" ", strip=True)
+                
+                # Detect context from header text
+                if "Nationality of Father" in header_text or "Full Name of Father" in header_text:
+                    current_context = "Father's "
+                elif "Nationality of Mother" in header_text or "Full Name of Mother" in header_text:
+                    current_context = "Mother's "
+                elif "Name of Child" in header_text:
+                    current_context = "" # Reset for child
 
                 # CASE 1: li-based data
                 if h.find("li") and v.find("li"):
                     keys = [li.text.strip() for li in h.find_all("li")]
                     vals2 = [li.text.strip() for li in v.find_all("li")]
-                    data.update(dict(zip(keys, vals2)))
+                    
+                    for k, val in zip(keys, vals2):
+                        final_key = k
+                        # Disambiguate common overlapping fields
+                        if k in ["Place of Birth", "Age", "Occupation"] and current_context:
+                            final_key = f"{current_context}{k}"
+                        
+                        # Fallback: if key still exists, append context or index
+                        if final_key in data:
+                            if current_context and current_context not in final_key:
+                                final_key = f"{current_context}{final_key}"
+                            else:
+                                # Last resort unique
+                                if final_key in data:
+                                     final_key = f"{final_key}_2"
+
+                        data[final_key] = val
 
                 # CASE 2: normal th → td
                 else:
-                    key = h.get_text(" ", strip=True)
-                    val = v.get_text(" ", strip=True)
-                    data[key] = val
+                    key = header_text
+                    final_key = key
+                    # Handle standalone 'Age' columns in Table 3
+                    if key == "Age" and current_context:
+                        final_key = f"{current_context}Age"
+                    
+                    if final_key in data:
+                         final_key = f"{final_key}_2"
+
+                    data[final_key] = v.get_text(" ", strip=True)
 
         return data
 
-    def _append_rows_csv(self, rows, filename):
+    def _append_rows_csv(self, rows, filename, columns=None):
         """Append rows (dicts or tuples) to a delimited file efficiently."""
         if not rows:
             return
@@ -619,6 +618,11 @@ class SOS:
         elif isinstance(first, dict):
             # Using pandas is safer for variable keys in scraped data
             df = pd.DataFrame(rows)
+            
+            if columns:
+                # Enforce specific schema order and presence
+                df = df.reindex(columns=columns).fillna('')
+            
             # If file exists, we append.
             # Note: If new columns appear in later chunks that weren't in the first chunk, 
             # they won't have a header in the CSV if the file already existed. 
@@ -628,9 +632,11 @@ class SOS:
         else:
             # fallback to pandas for unknown types
             df = pd.DataFrame(rows)
+            if columns:
+                df = df.reindex(columns=columns).fillna('')
             df.to_csv(filename, sep='|', mode='a', index=False, header=not file_exists)
 
-    def export_data(self, data,filename='Birth_ids_data.csv'):
+    def export_data(self, data, filename='Birth_ids_data.csv', columns=None):
         """Write `data` to `filename` using a memory-efficient writer.
 
         Accepts a list of dicts or a list of tuples/lists.
@@ -643,33 +649,36 @@ class SOS:
         chunk_size = 5000
         if isinstance(data, list) and len(data) > chunk_size:
             for i in range(0, len(data), chunk_size):
-                self._append_rows_csv(data[i:i+chunk_size], filename)
+                self._append_rows_csv(data[i:i+chunk_size], filename, columns=columns)
         else:
-            self._append_rows_csv(data, filename)
+            self._append_rows_csv(data, filename, columns=columns)
 
         # print(f"Appended {len(data)} rows to {filename}")
 
 
-    def process_county_birth(self, county, max_workers_data=50, max_retries=5):
+    def process_county_birth(self, county,birth_death_data, max_workers_data=50, max_retries=5):
         """Process a single county: Fetch IDs, then fetch details, saving incrementally."""
-        local_data = self.birth_data.copy()
         local_params = self.birth_params.copy()
-        local_data['BirthCounty'] = county
 
+        if birth_death_data=='Birth':
+            local_data = self.birth_data.copy()
+            local_data['BirthCounty'] = county
+        else:
+            local_data = self.death_data.copy()
+            local_data['DeathCounty'] = county
+            local_params['recordsPerPage'] = '75'
         ids = []
-
-        # Retry logic for fetching IDs
         for attempt in range(max_retries + 1):
             try:
                 ids = self.get_all_ids(self.birth_url, local_data, local_params)
+                print(f'{county} total IDs -',len(ids))
                 if ids:
                     break
             except Exception as e:
-                print(f"Error fetching IDs for {county}: {e}")
-            
+                import sys
+                print(f"Error fetching IDs for {county} on line {sys.exc_info()[-1].tb_lineno}: {e}")
             if attempt < max_retries:
                 wait_time = (2 ** attempt) * 1
-                # print(f"Retrying {county} IDs in {wait_time}s...")
                 time.sleep(wait_time)
         
         if not ids:
@@ -678,15 +687,14 @@ class SOS:
 
         # Save IDs immediately
         # self.export_data([(rid, county) for rid in ids], filename=f"Birth_{county}_ids.csv")
-        self.export_data([(rid, county) for rid in ids], filename=f"Birth_ids.csv")
+        self.export_data([(rid, county) for rid in ids], filename=f"{birth_death_data}_ids.csv") 
         
         # Fetch Details
-        # records_file = f"Birth_{county}_records.csv"
-        records_file = f"Birth_records.csv"
+        records_file = f"{birth_death_data}_records.csv"
         buffer = []
         
         with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
-            future_to_id = {executor.submit(self.get_birth_data_by_id, record_id, 'Birth'): record_id for record_id in ids}
+            future_to_id = {executor.submit(self.get_birth_data_by_id, record_id, birth_death_data): record_id for record_id in ids}
             
         with tqdm(total=len(ids), desc=f"Birth - {county}", unit="id") as pbar:
             for future in as_completed(future_to_id):
@@ -697,16 +705,17 @@ class SOS:
                     buffer.append(rec)
                     
                     if len(buffer) >= 200:
-                        self.export_data(buffer, filename=records_file)
+                        cols = self.birth_output_columns if birth_death_data == 'Birth' else None
+                        self.export_data(buffer, filename=records_file, columns=cols)
                         buffer = []
                 except Exception as e:
                     pass
                 finally:
                     pbar.update(1)
         
-        # Final flush
         if buffer:
-            self.export_data(buffer, filename=records_file)
+            cols = self.birth_output_columns if birth_death_data == 'Birth' else None
+            self.export_data(buffer, filename=records_file, columns=cols)
         
         print(f"Completed {county}: {len(ids)} records saved.")
 
@@ -733,9 +742,9 @@ class SOS:
                         pbar.update(1)
 
         # write per-county files and append to global file
-        self.export_data(data, filename=f"Birth_{county}_records.csv")
+        self.export_data(data, filename=f"Birth_{county}_records.csv", columns=self.birth_output_columns)
         self.export_data([(rid, county) for rid in ids], filename=f"Birth_{county}_ids.csv")
-        self.export_data(data)
+        self.export_data(data, columns=self.birth_output_columns)
 
     def run_land(self, max_workers=50):
         """Scrape Land records"""
@@ -761,15 +770,20 @@ class SOS:
         self.export_data(data, filename='Land_records.csv')
         self.export_data([(rid, '') for rid in ids], filename='land_ids_by_county.csv')
 
-    def run_all_counties_birth(self, max_workers_counties=10, max_workers_data=25, max_retries=5):
+    def run_all_counties_birth(self,birth_death_data, max_workers_counties=10, max_workers_data=25, max_retries=5):
+        if birth_death_data=='Birth':
+            counties = self.all_birth_counties
+        else:
+            counties = self.all_death_counties
+        
         """Fetch Birth data from all counties in parallel, processing each county fully."""
         print(f"\n{'='*60}")
-        print(f"Starting parallel scrape for {len(self.all_counties)} counties")
+        print(f"Starting parallel scrape for {birth_death_data} -  {len(counties)} counties")
         print(f"{'='*60}\n")
 
-        for county in self.all_counties:
+        for county in counties:
             try:
-                self.process_county_birth(county, max_workers_data, max_retries)
+                self.process_county_birth(county,birth_death_data, max_workers_data, max_retries)
             except Exception as e:
                 print(f"County {county} generated an exception: {e}")
 
@@ -861,11 +875,11 @@ class SOS:
     def run_all_counties_naturalization(self, max_workers_counties=10, max_workers_data=25, max_retries=5):
         """Fetch Naturalization IDs and details from all counties (per-county CSVs + progress bars)"""
         print(f"\n{'='*60}")
-        print(f"Starting to scrape Naturalization records from all {len(self.all_counties)} counties")
+        print(f"Starting to scrape Naturalization records from all {len(self.all_birth_counties)} counties")
         print(f"{'='*60}\n")
 
         all_ids_by_county = {}
-        counties_to_process = self.all_counties[:]
+        counties_to_process = self.all_birth_counties[:]
         retry_count = 0
 
         while counties_to_process and retry_count < max_retries:
@@ -942,22 +956,44 @@ if __name__ == "__main__":
     # Option 1: Scrape Birth records from all counties
     # Limit to 3 counties for testing
 
-    # sos.all_counties = sos.all_counties[0:3]
-    # sos.all_counties = ['Douglas','Clay']
-    sos.run_all_counties_birth(max_workers_counties=12,
+    # sos.all_birth_counties = sos.all_birth_counties[0:3]
+    # sos.all_birth_counties = ['Douglas','Clay']
+    # sos._fetch_page('Birth',data=sos.birth_death_data)
+    
+    #Only total rec in county
+    # sos.birth_data['recordsPerPage'] = '75'
+    # for i in sos.all_birth_counties:
+    #     sos.death_data['DeathCounty']=i
+    #     print('county - ',i,'Records: ',sos._fetch_page(page_number=1, url=sos.birth_url, data=sos.death_data, params=sos.birth_params, retry_count=0, max_retries=20))
+
+
+    sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
                                max_workers_data=30,
                                max_retries=7)
+    # sos.run_all_counties_birth('Death',max_workers_counties=12,
+    #                            max_workers_data=30,
+    #                            max_retries=7)
+
 
     # Option 2: Scrape Birth records from a single county
     # sos.run_birth(county='Douglas', max_workers=15)
-     # sos.get_birth_data_by_id('121579','Birth')
+
+    
+    # print(sos.get_birth_data_by_id('17141','Birth'))
     
     # for i in ['Douglas','Clay']:
     #     sos.process_county_birth(
+    #     birth_death_data='Birth',
     #     county=i,
     #     max_workers_data=30,
     #     max_retries=7
     #     )
+    # sos.process_county_birth(
+    # birth_death_data='Birth',
+    # county='Douglas',
+    # max_workers_data=30,
+    # max_retries=7
+    # )
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
