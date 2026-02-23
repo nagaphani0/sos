@@ -1,0 +1,10 @@
+beautifulsoup4
+requests
+pandas
+tqdm
+playwright
+DrissionPage
+PyVirtualDisplay
+Flask
+Flask-Cors
+mysql-connector-python
