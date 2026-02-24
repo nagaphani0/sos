@@ -516,6 +516,7 @@ class SOS:
         return data
 
     def get_birth_data_by_id(self,record_id, record_type):
+        # time.sleep(5)
 
         params={}
         params['id'] = record_id
@@ -526,7 +527,13 @@ class SOS:
             params=params,
             cookies=self.cookies,
             headers=self.headers,
+            # timeout=20
         )
+
+        if response.status_code == 429:
+            print(record_id,' - ',response.status_code)
+            # time.sleep(30)
+            # return self.get_birth_data_by_id(record_id, record_type)
 
         # Assuming 'html_content' is the HTML string you provided
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -656,7 +663,7 @@ class SOS:
         # print(f"Appended {len(data)} rows to {filename}")
 
 
-    def process_county_birth(self, county,birth_death_data, max_workers_data=50, max_retries=5):
+    def process_county_birth(self, county,birth_death_data, max_workers_data=10, max_retries=5):
         """Process a single county: Fetch IDs, then fetch details, saving incrementally."""
         local_params = self.birth_params.copy()
 
@@ -775,11 +782,11 @@ class SOS:
             counties = self.all_birth_counties
         else:
             counties = self.all_death_counties
-        
         """Fetch Birth data from all counties in parallel, processing each county fully."""
         print(f"\n{'='*60}")
         print(f"Starting parallel scrape for {birth_death_data} -  {len(counties)} counties")
         print(f"{'='*60}\n")
+        
 
         for county in counties:
             try:
@@ -967,9 +974,9 @@ if __name__ == "__main__":
     #     print('county - ',i,'Records: ',sos._fetch_page(page_number=1, url=sos.birth_url, data=sos.death_data, params=sos.birth_params, retry_count=0, max_retries=20))
 
 
-    sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
-                               max_workers_data=30,
-                               max_retries=7)
+    # sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
+    #                            max_workers_data=30,
+    #                            max_retries=7)
     # sos.run_all_counties_birth('Death',max_workers_counties=12,
     #                            max_workers_data=30,
     #                            max_retries=7)
@@ -988,12 +995,13 @@ if __name__ == "__main__":
     #     max_workers_data=30,
     #     max_retries=7
     #     )
-    # sos.process_county_birth(
-    # birth_death_data='Birth',
-    # county='Douglas',
-    # max_workers_data=30,
-    # max_retries=7
-    # )
+    
+    sos.process_county_birth(
+    birth_death_data='Birth',
+    county='Clay',
+    max_workers_data=5,
+    max_retries=7
+    )
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
