@@ -515,27 +515,47 @@ class SOS:
 
         return data
 
-    def get_birth_data_by_id(self,record_id, record_type):
-        # time.sleep(5)
+    def get_birth_data_by_id(self, record_id, record_type, retry_count=0, max_retries=20):
 
-        params={}
+        params = {}
         params['id'] = record_id
         params['type'] = record_type
 
-        response = self.session.get(
-            self.birth_url + 'Detail',
-            params=params,
-            cookies=self.cookies,
-            headers=self.headers,
-            # timeout=20
-        )
+        try:
+            response = self.session.get(
+                self.birth_url + 'Detail',
+                params=params,
+                cookies=self.cookies,
+                headers=self.headers,
+                timeout=60
+            )
 
-        if response.status_code == 429:
-            print(record_id,' - ',response.status_code)
-            # time.sleep(30)
-            # return self.get_birth_data_by_id(record_id, record_type)
+            if response.status_code == 429:
+                wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10)
+                print(f"{record_id} - 429 rate limited. Retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{max_retries})")
+                time.sleep(wait_time)
+                return self.get_birth_data_by_id(record_id, record_type, retry_count + 1, max_retries)
 
-        # Assuming 'html_content' is the HTML string you provided
+            elif response.status_code != 200:
+                if retry_count < max_retries:
+                    wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 5)
+                    print(f"{record_id} - HTTP {response.status_code}. Retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    return self.get_birth_data_by_id(record_id, record_type, retry_count + 1, max_retries)
+                else:
+                    print(f"{record_id} - HTTP {response.status_code}. Max retries reached, skipping.")
+                    return {'id': record_id, 'type': record_type}
+
+        except Exception as e:
+            if retry_count < max_retries:
+                wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 5)
+                print(f"{record_id} - Exception: {e}. Retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{max_retries})")
+                time.sleep(wait_time)
+                return self.get_birth_data_by_id(record_id, record_type, retry_count + 1, max_retries)
+            else:
+                print(f"{record_id} - Exception: {e}. Max retries reached, skipping.")
+                return {'id': record_id, 'type': record_type}
+
         soup = BeautifulSoup(response.text, 'html.parser')
 
         data = {}
@@ -995,7 +1015,7 @@ if __name__ == "__main__":
     #     max_workers_data=30,
     #     max_retries=7
     #     )
-    
+
     sos.process_county_birth(
     birth_death_data='Birth',
     county='Clay',
