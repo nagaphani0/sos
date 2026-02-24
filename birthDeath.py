@@ -994,9 +994,10 @@ if __name__ == "__main__":
     #     print('county - ',i,'Records: ',sos._fetch_page(page_number=1, url=sos.birth_url, data=sos.death_data, params=sos.birth_params, retry_count=0, max_retries=20))
 
 
-    # sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
-    #                            max_workers_data=30,
-    #                            max_retries=7)
+    #main All con
+    sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
+                               max_workers_data=30,
+                               max_retries=7)
     # sos.run_all_counties_birth('Death',max_workers_counties=12,
     #                            max_workers_data=30,
     #                            max_retries=7)
@@ -1016,12 +1017,12 @@ if __name__ == "__main__":
     #     max_retries=7
     #     )
 
-    sos.process_county_birth(
-    birth_death_data='Birth',
-    county='Clay',
-    max_workers_data=5,
-    max_retries=7
-    )
+    # sos.process_county_birth(
+    # birth_death_data='Birth',
+    # county='Clay',
+    # max_workers_data=5,
+    # max_retries=7
+    # )
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
