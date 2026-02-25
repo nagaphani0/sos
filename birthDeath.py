@@ -380,12 +380,14 @@ class SOS:
     _NEXT_RE = re.compile(r'page-link[^"]*>\s*Next\s*<', re.IGNORECASE)
 
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
+        print(page_number)
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
         page_ids = []
+        print(url,local_params,data)
         try:
             self.session.post(
-                    self.birth_url,
+                    url,
                     cookies=self.cookies,
                     headers=self.headers,
                     data=data,
@@ -398,6 +400,7 @@ class SOS:
                 headers=self.headers,
                 timeout=60
             )
+            print(response.status_code)
             if response.status_code == 200:
                 text = response.text
 
@@ -410,7 +413,7 @@ class SOS:
                     if 'id=' in href and 'Detail' in href:
                         record_id = href.split('id=')[1].split('&')[0]
                         page_ids.append(record_id)
-
+                print(page_ids)
 
                 
                 # print('page ids',page_ids)
@@ -797,7 +800,7 @@ class SOS:
         self.export_data(data, filename='Land_records.csv')
         self.export_data([(rid, '') for rid in ids], filename='land_ids_by_county.csv')
 
-    def run_all_counties_birth(self,birth_death_data, max_workers_counties=10, max_workers_data=25, max_retries=5):
+    def run_all_counties_birth(self,birth_death_data, max_workers_counties=10, max_workers_data=5, max_retries=5):
         if birth_death_data=='Birth':
             counties = self.all_birth_counties
         else:
@@ -818,7 +821,7 @@ class SOS:
         print("All counties processed.")
         print(f"{'='*60}\n")
 
-    def run_all_counties_land(self, max_workers_counties=10, max_workers_data=25, max_retries=5):
+    def run_all_counties_land(self, max_workers_counties=5, max_workers_data=5, max_retries=5):
         """Fetch Land IDs from all counties using land_counties mapping"""
         print(f"\n{'='*60}")
         print(f"Starting to scrape Land records from all {len(self.land_counties)} counties")
@@ -827,28 +830,20 @@ class SOS:
         all_ids_by_county = {}
         counties_to_process = list(self.land_counties.keys())
         retry_count = 0
+        local_params = {}
+        local_params['recordsPerPage'] = '75'
+        local_data = self.land_data.copy()
 
         while counties_to_process and retry_count < max_retries:
             if retry_count > 0:
                 wait_time = (2 ** (retry_count - 1)) * 5
                 time.sleep(wait_time)
 
-            with ThreadPoolExecutor(max_workers=max_workers_counties) as executor:
-                futures = {}
-                for county_name in counties_to_process:
-                    current_data = self.land_data.copy()
-                    current_data['CountyName'] = str(self.land_counties[county_name])
-                    future = executor.submit(self.get_all_ids, url=self.land_url, data=current_data, params=self.page_params.copy())
-                    futures[future] = county_name
-
-                for future in as_completed(futures):
-                    county = futures[future]
-                    try:
-                        ids = future.result()
-                        all_ids_by_county[county] = ids
-                        print(f"✓ Land County '{county}' (ID: {self.land_counties[county]}): {len(ids)} IDs fetched")
-                    except Exception as e:
-                        print(f"✗ Error fetching Land IDs for {county}: {e}")
+            for county_name in counties_to_process:
+                local_data['CountyName'] = self.land_counties[county_name]
+                ids = self.get_all_ids(url=self.land_url, data=local_data, params=local_params.copy())
+                all_ids_by_county[county_name] = ids
+                print(f"✓ Land County '{county_name}' (ID: {self.land_counties[county_name]}): {len(ids)} IDs fetched")
 
             counties_to_process = [c for c in counties_to_process if len(all_ids_by_county.get(c, [])) == 0]
             retry_count += 1
@@ -995,9 +990,9 @@ if __name__ == "__main__":
 
 
     #main All con
-    sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
-                               max_workers_data=30,
-                               max_retries=7)
+    # sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
+    #                            max_workers_data=30,
+    #                            max_retries=7)
     # sos.run_all_counties_birth('Death',max_workers_counties=12,
     #                            max_workers_data=30,
     #                            max_retries=7)
@@ -1026,7 +1021,10 @@ if __name__ == "__main__":
 
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
-    # sos.run_all_counties_land(max_workers_counties=4)
+    
+    sos.land_counties = { 'Adair': 2,'Allen': 119}
+    # print(sos.land_counties)
+    sos.run_all_counties_land(max_workers_counties=4)
 
     # print(sos.get_land_and_naturalization_data_by_id('land', '7672'))
 
