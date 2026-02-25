@@ -13,7 +13,6 @@ import csv
 try:
     from tqdm import tqdm
 except Exception:
-    # fallback dummy tqdm (keeps script working if tqdm isn't installed)
     class tqdm:
         def __init__(self, total=None, desc=None, unit=None):
             self.total = total
@@ -386,13 +385,15 @@ class SOS:
         page_ids = []
         print(url,local_params,data)
         try:
-            self.session.post(
+            temp=self.session.post(
                     url,
                     cookies=self.cookies,
                     headers=self.headers,
                     data=data,
-                    timeout=60
-                )
+                    timeout=60)
+            if 'No records were found in the Database with this Search Criteria. Please try again.' in temp.text:
+                return
+                
             response = self.session.get(
                 url + 'Results',
                 params=local_params,
