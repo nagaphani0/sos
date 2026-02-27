@@ -379,21 +379,22 @@ class SOS:
     _NEXT_RE = re.compile(r'page-link[^"]*>\s*Next\s*<', re.IGNORECASE)
 
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
-        print(page_number)
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
         page_ids = []
-        print(url,local_params,data)
+
         try:
-            temp=self.session.post(
+            resp_post = self.session.post(
                     url,
                     cookies=self.cookies,
                     headers=self.headers,
                     data=data,
                     timeout=60)
-            if 'No records were found in the Database with this Search Criteria. Please try again.' in temp.text:
-                return
-                
+            if 'No records were found in the Database with this Search Criteria. Please try again.' in resp_post.text:
+                # print("No records found in this county - ",local_params.get('BirthCounty') or local_params.get('CountyName'))
+                print("No records found in this county - ",local_params)
+                return [], False, False
+                    
             response = self.session.get(
                 url + 'Results',
                 params=local_params,
@@ -401,7 +402,7 @@ class SOS:
                 headers=self.headers,
                 timeout=60
             )
-            print(response.status_code)
+            # print(response.status_code)
             if response.status_code == 200:
                 text = response.text
 
@@ -414,7 +415,7 @@ class SOS:
                     if 'id=' in href and 'Detail' in href:
                         record_id = href.split('id=')[1].split('&')[0]
                         page_ids.append(record_id)
-                print(page_ids)
+                # print(page_ids)
 
                 
                 # print('page ids',page_ids)
@@ -524,7 +525,6 @@ class SOS:
         params = {}
         params['id'] = record_id
         params['type'] = record_type
-
         try:
             response = self.session.get(
                 self.birth_url + 'Detail',
@@ -533,7 +533,6 @@ class SOS:
                 headers=self.headers,
                 timeout=60
             )
-
             if response.status_code == 429:
                 wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10)
                 print(f"{record_id} - 429 rate limited. Retrying in {wait_time:.1f}s (attempt {retry_count + 1}/{max_retries})")
@@ -719,6 +718,7 @@ class SOS:
         # Save IDs immediately
         # self.export_data([(rid, county) for rid in ids], filename=f"Birth_{county}_ids.csv")
         self.export_data([(rid, county) for rid in ids], filename=f"{birth_death_data}_ids.csv") 
+        print('Ids pushed to export for county -',county)
         
         # Fetch Details
         records_file = f"{birth_death_data}_records.csv"
@@ -822,7 +822,7 @@ class SOS:
         print("All counties processed.")
         print(f"{'='*60}\n")
 
-    def run_all_counties_land(self, max_workers_counties=5, max_workers_data=5, max_retries=5):
+    def run_all_counties_land(self, max_workers_data=5, max_retries=4):
         """Fetch Land IDs from all counties using land_counties mapping"""
         print(f"\n{'='*60}")
         print(f"Starting to scrape Land records from all {len(self.land_counties)} counties")
@@ -863,8 +863,8 @@ class SOS:
                 continue
 
             county_details = []
-            ids_file = f"Land_{county}_ids.csv"
-            records_file = f"Land_{county}_records.csv"
+            ids_file = f"Land_ids.csv"
+            records_file = f"Land_records.csv"
 
             with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
                 futures = {executor.submit(self.get_land_and_naturalization_data_by_id, 'land', record_id): record_id for record_id in ids}
@@ -892,7 +892,7 @@ class SOS:
             self.export_data([(rid, county) for rid in ids], filename=ids_file)
 
         # export aggregated IDs for compatibility
-        self.export_data(all_record_ids, filename='land_ids_by_county.csv')
+        # self.export_data(all_record_ids, filename='land_ids_by_county.csv')
 
 
     def run_all_counties_naturalization(self, max_workers_counties=10, max_workers_data=25, max_retries=5):
@@ -991,11 +991,11 @@ if __name__ == "__main__":
 
 
     #main All con
-    # sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=12,
-    #                            max_workers_data=30,
-    #                            max_retries=7)
+    sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=2,
+                               max_workers_data=3,
+                               max_retries=7)
     # sos.run_all_counties_birth('Death',max_workers_counties=12,
-    #                            max_workers_data=30,
+    #                            max_workers_data=3,
     #                            max_retries=7)
 
 
@@ -1023,9 +1023,9 @@ if __name__ == "__main__":
     # Option 3: Scrape Land records
     # sos.run_land(max_workers=10)
     
-    sos.land_counties = { 'Adair': 2,'Allen': 119}
-    # print(sos.land_counties)
-    sos.run_all_counties_land(max_workers_counties=4)
+    # sos.land_counties = { 'Adair': 2,'Allen': 119,'Andrew': 3}
+    # # print(sos.land_counties)
+    # sos.run_all_counties_land()
 
     # print(sos.get_land_and_naturalization_data_by_id('land', '7672'))
 
