@@ -87,7 +87,7 @@ class SOS:
         self.naturalization_data =  {
                 'FullName': '',
                 'NativeCountry': '',
-                'CountyName': 'Andrew',
+                'CountyName': '',
                 'YearRangeBegin': '1816',
                 'YearRangeEnd': '1955',
                 'Search': 'Search',
@@ -118,6 +118,14 @@ class SOS:
         "Sullivan", "Texas", "Vernon", "Warren", "Washington", "Webster",
         "Worth"
         ]
+        self.naturalization_counties = [
+    "-- Search All --", "Andrew", "Bates", "Bollinger", "Buchanan", "Butler", 
+    "Cape Girardeau", "Carroll", "Cedar", "Chariton", "Clark", "Clinton", 
+    "Cole", "Cooper", "Franklin", "Gasconade", "Greene", "Howard", "Iron", 
+    "Knox", "Lewis", "Macon", "Miller", "Moniteau", "Perry", "Phelps", 
+    "Platte", "Ray", "Shelby", "St. Charles", "St. Louis City", 
+    "St. Louis County", "Ste. Genevieve"
+]
 
         self.all_birth_counties = [
             "Adair",
@@ -381,6 +389,7 @@ class SOS:
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
+        print(local_params['PageNumber'])
         page_ids = []
 
         try:
@@ -390,6 +399,7 @@ class SOS:
                     headers=self.headers,
                     data=data,
                     timeout=60)
+            print(response.status_code)
             if 'No records were found in the Database with this Search Criteria. Please try again.' in resp_post.text:
                 # print("No records found in this county - ",local_params.get('BirthCounty') or local_params.get('CountyName'))
                 print("No records found in this county - ",local_params)
@@ -402,7 +412,7 @@ class SOS:
                 headers=self.headers,
                 timeout=60
             )
-            # print(response.status_code)
+            print(response.status_code)
             if response.status_code == 200:
                 text = response.text
 
@@ -415,7 +425,7 @@ class SOS:
                     if 'id=' in href and 'Detail' in href:
                         record_id = href.split('id=')[1].split('&')[0]
                         page_ids.append(record_id)
-                # print(page_ids)
+                print(page_ids)
 
                 
                 # print('page ids',page_ids)
@@ -454,6 +464,7 @@ class SOS:
         except Exception as e:
             if retry_count < max_retries:
                 time.sleep((2 ** min(retry_count, 6)) + 5)
+                print(e)
                 return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
             return [], False, False
 
@@ -895,14 +906,16 @@ class SOS:
         # self.export_data(all_record_ids, filename='land_ids_by_county.csv')
 
 
-    def run_all_counties_naturalization(self, max_workers_counties=10, max_workers_data=25, max_retries=5):
+    def run_all_counties_naturalization(self, max_workers_counties=5, max_workers_data=5, max_retries=5):
         """Fetch Naturalization IDs and details from all counties (per-county CSVs + progress bars)"""
         print(f"\n{'='*60}")
-        print(f"Starting to scrape Naturalization records from all {len(self.all_birth_counties)} counties")
+        print(f"Starting to scrape Naturalization records from all {len(self.naturalization_counties)} counties")
         print(f"{'='*60}\n")
 
         all_ids_by_county = {}
-        counties_to_process = self.all_birth_counties[:]
+        counties_to_process = self.naturalization_counties[:]
+        local_params = {}
+        local_params['recordsPerPage'] = '75'
         retry_count = 0
 
         while counties_to_process and retry_count < max_retries:
@@ -915,7 +928,7 @@ class SOS:
                 for county in counties_to_process:
                     current_data = self.naturalization_data.copy()
                     current_data['CountyName'] = county
-                    future = executor.submit(self.get_all_ids, url=self.naturalization_url, data=current_data, params=self.page_params.copy())
+                    future = executor.submit(self.get_all_ids, url=self.naturalization_url, data=current_data, params=local_params)
                     futures[future] = county
 
                 for future in as_completed(futures):
@@ -942,8 +955,8 @@ class SOS:
                 continue
 
             county_details = []
-            ids_file = f"Naturalization_{county}_ids.csv"
-            records_file = f"Naturalization_{county}_records.csv"
+            ids_file = f"Naturalization_ids.csv"
+            records_file = f"Naturalization_records.csv"
 
             with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
                 futures = {executor.submit(self.get_land_and_naturalization_data_by_id, 'naturalization', record_id): record_id for record_id in ids}
@@ -991,9 +1004,9 @@ if __name__ == "__main__":
 
 
     #main All con
-    sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=2,
-                               max_workers_data=3,
-                               max_retries=7)
+    # sos.run_all_counties_birth(birth_death_data='Birth',max_workers_counties=2,
+    #                            max_workers_data=3,
+    #                            max_retries=7)
     # sos.run_all_counties_birth('Death',max_workers_counties=12,
     #                            max_workers_data=3,
     #                            max_retries=7)
@@ -1020,13 +1033,15 @@ if __name__ == "__main__":
     # max_retries=7
     # )
 
-    # Option 3: Scrape Land records
+    # Scrape Land records
     # sos.run_land(max_workers=10)
     
     # sos.land_counties = { 'Adair': 2,'Allen': 119,'Andrew': 3}
     # # print(sos.land_counties)
     # sos.run_all_counties_land()
 
+    # Scrape naturalization records
     # print(sos.get_land_and_naturalization_data_by_id('land', '7672'))
+    sos.run_all_counties_naturalization()
 
     # print(sos.get_land_and_naturalization_data_by_id('naturalization', '8115'))
