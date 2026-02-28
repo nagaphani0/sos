@@ -33,7 +33,7 @@ class SOS:
     def __init__(self) :
         self.birth_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/BirthDeath/'
         self.land_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Land/'
-        self.naturalization_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Naturalization'
+        self.naturalization_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Naturalization/'
 
         # single headers declaration
         self.headers = {
@@ -118,14 +118,12 @@ class SOS:
         "Sullivan", "Texas", "Vernon", "Warren", "Washington", "Webster",
         "Worth"
         ]
-        self.naturalization_counties = [
-    "-- Search All --", "Andrew", "Bates", "Bollinger", "Buchanan", "Butler", 
-    "Cape Girardeau", "Carroll", "Cedar", "Chariton", "Clark", "Clinton", 
-    "Cole", "Cooper", "Franklin", "Gasconade", "Greene", "Howard", "Iron", 
-    "Knox", "Lewis", "Macon", "Miller", "Moniteau", "Perry", "Phelps", 
-    "Platte", "Ray", "Shelby", "St. Charles", "St. Louis City", 
-    "St. Louis County", "Ste. Genevieve"
-]
+        self.naturalization_counties = ["Andrew", "Bates", "Bollinger", "Buchanan", "Butler", 
+            "Cape Girardeau", "Carroll", "Cedar", "Chariton", "Clark", "Clinton", 
+            "Cole", "Cooper", "Franklin", "Gasconade", "Greene", "Howard", "Iron", 
+            "Knox", "Lewis", "Macon", "Miller", "Moniteau", "Perry", "Phelps", 
+            "Platte", "Ray", "Shelby", "St. Charles", "St. Louis City", 
+            "St. Louis County", "Ste. Genevieve"]
 
         self.all_birth_counties = [
             "Adair",
@@ -389,9 +387,7 @@ class SOS:
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
-        print(local_params['PageNumber'])
         page_ids = []
-
         try:
             resp_post = self.session.post(
                     url,
@@ -399,7 +395,8 @@ class SOS:
                     headers=self.headers,
                     data=data,
                     timeout=60)
-            print(response.status_code)
+            # print('resp_post.status_code',resp_post.status_code)
+
             if 'No records were found in the Database with this Search Criteria. Please try again.' in resp_post.text:
                 # print("No records found in this county - ",local_params.get('BirthCounty') or local_params.get('CountyName'))
                 print("No records found in this county - ",local_params)
@@ -412,7 +409,7 @@ class SOS:
                 headers=self.headers,
                 timeout=60
             )
-            print(response.status_code)
+            # print('response.status_code',response.status_code)
             if response.status_code == 200:
                 text = response.text
 
@@ -425,7 +422,7 @@ class SOS:
                     if 'id=' in href and 'Detail' in href:
                         record_id = href.split('id=')[1].split('&')[0]
                         page_ids.append(record_id)
-                print(page_ids)
+                # print(page_ids)
 
                 
                 # print('page ids',page_ids)
@@ -443,7 +440,6 @@ class SOS:
                 #             print('total records',total_records)
                 #     except Exception:
                 #         pass
-
                 # print(f"Records:{page_ids}")
 
                 print(f"Page {page_number}",end='', flush=True)
@@ -926,7 +922,7 @@ class SOS:
             for county in counties_to_process:
                 current_data = self.naturalization_data.copy()
                 current_data['CountyName'] = county
-                ids = self.get_all_ids, url=self.naturalization_url, data=current_data, params=local_params
+                ids = self.get_all_ids(url=self.naturalization_url, data=current_data, params=local_params)
                 all_ids_by_county[county] = ids
                 print(f"✓ Naturalization County '{county}': {len(ids)} IDs fetched")
         
