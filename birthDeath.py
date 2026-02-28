@@ -821,7 +821,6 @@ class SOS:
         print(f"\n{'='*60}")
         print(f"Starting parallel scrape for {birth_death_data} -  {len(counties)} counties")
         print(f"{'='*60}\n")
-        
 
         for county in counties:
             try:
@@ -923,23 +922,14 @@ class SOS:
                 wait_time = (2 ** (retry_count - 1)) * 5
                 time.sleep(wait_time)
 
-            with ThreadPoolExecutor(max_workers=max_workers_counties) as executor:
-                futures = {}
-                for county in counties_to_process:
-                    current_data = self.naturalization_data.copy()
-                    current_data['CountyName'] = county
-                    future = executor.submit(self.get_all_ids, url=self.naturalization_url, data=current_data, params=local_params)
-                    futures[future] = county
-
-                for future in as_completed(futures):
-                    county = futures[future]
-                    try:
-                        ids = future.result()
-                        all_ids_by_county[county] = ids
-                        print(f"✓ Naturalization County '{county}': {len(ids)} IDs fetched")
-                    except Exception as e:
-                        print(f"✗ Error fetching Naturalization IDs for {county}: {e}")
-
+            
+            for county in counties_to_process:
+                current_data = self.naturalization_data.copy()
+                current_data['CountyName'] = county
+                ids = self.get_all_ids, url=self.naturalization_url, data=current_data, params=local_params
+                all_ids_by_county[county] = ids
+                print(f"✓ Naturalization County '{county}': {len(ids)} IDs fetched")
+        
             counties_to_process = [c for c in counties_to_process if len(all_ids_by_county.get(c, [])) == 0]
             retry_count += 1
 
