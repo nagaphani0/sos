@@ -34,6 +34,7 @@ class SOS:
         self.birth_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/BirthDeath/'
         self.land_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Land/'
         self.naturalization_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Naturalization/'
+        self.soldiers_url='https://s1.sos.mo.gov/Records/Archives/ArchivesMvc/Soldiers/'
 
         # single headers declaration
         self.headers = {
@@ -225,6 +226,10 @@ class SOS:
             "Webster",
             "Worth"
 ]
+        self.soldiers_params = {
+            'id': 'S280954',
+            'conflict': 'Civil War',
+        }
 
 
         self.land_counties = {
@@ -362,6 +367,14 @@ class SOS:
             'BirthSubmit': 'Search',
             '__ncforminfo': 'QQGzh8actEkVswURTyIRLqske4Sxcsi-akMT1fROk56vuINWbFjp-FoGkNhWeMqbH7uAql7GAbZP6d3v4rMFI-RPhop0-HnbsWAMeW_zE_v2jbjqaH273g==',
         }
+        self.soldiers_data = {
+            'Name': '',
+            'NameOfUnit': '',
+            'Conflict': 'All',
+            'Branch': 'all',
+            'Submit': 'Submit',
+            '__ncforminfo': 'Exj7qb74KQHG-8KBqqZCAapKWBbfyNx_cVtGY3uM8G_EC7NvS23AWd5wSjcSGTrt1tKN68a5S1jlPq6yc4ePTbaJD1z9uStSS3DsJKbeQVf2fib1VCQlMLeUbLSfQxDmBq6IW40qy89T71JpULlYqc59vD3vXB_3ReIvxkCGSXaQmfvDXxI5iG0iGNftM1zhxKnAGFVH0VrRkIPq9PtIR3cMV0BQBBr9XSx79ReMuQIuKt2t01_uYAlLlUR-rgFjoNpm-jIXyAIIqApG7OuN5mFTGAvYISK47XCBPIqt3WQ=',
+                }
  
         self.birth_params = {
             'PageNumber': '',
@@ -387,6 +400,7 @@ class SOS:
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
+        # print(data,local_params['PageNumber'])
         page_ids = []
         try:
             resp_post = self.session.post(
@@ -420,9 +434,17 @@ class SOS:
                 for link in links:
                     href = link['href']
                     if 'id=' in href and 'Detail' in href:
-                        record_id = href.split('id=')[1].split('&')[0]
+                        # "Detail?id=S176439&conflict=Civil War"
+                        # Detail?id=70782&type=Birth
+                        if 'conflict' in href:
+                            # conflict=href.split('id=')[1].split('&')[1].split('=')[1]
+                            # record_id = href.split('id=')[1].split('&')[0]
+                            record_id = href
+                        else:
+                            record_id = href.split('id=')[1].split('&')[0]
+                        
                         page_ids.append(record_id)
-                # print(page_ids)
+                print(page_ids)
 
                 
                 # print('page ids',page_ids)
@@ -483,8 +505,7 @@ class SOS:
             if not has_next:
                 return all_ids
                 
-
-    def get_land_and_naturalization_data_by_id(self, url, record_id):
+    def get_general_data_by_id(self, url, record_id):
 
         params = {}
         params['id'] = record_id
@@ -492,8 +513,15 @@ class SOS:
         if url == 'land':
             url = self.land_url + 'Detail'
 
-        else:
+        elif url == 'naturalization':
             url = self.naturalization_url + 'Detail'
+
+        elif url == 'soldiers':
+            url = self.soldiers_url + 'Detail'
+            conflict=record_id.split('id=')[1].split('&')[1].split('=')[1]
+            record_id = record_id.split('id=')[1].split('&')[0]
+            params['id'] = record_id
+            params['conflict'] = conflict
 
         response = self.session.get(
             url,
@@ -791,7 +819,7 @@ class SOS:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # use the land/naturalization detail fetcher (first arg indicates type)
-            future_to_id = {executor.submit(self.get_land_and_naturalization_data_by_id, 'land', record_id): record_id for record_id in ids}
+            future_to_id = {executor.submit(self.get_general_data_by_id, 'land', record_id): record_id for record_id in ids}
 
             with tqdm(total=len(ids), desc="Land", unit="id") as pbar:
                 for future in as_completed(future_to_id):
@@ -873,7 +901,7 @@ class SOS:
             records_file = f"Land_records.csv"
 
             with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
-                futures = {executor.submit(self.get_land_and_naturalization_data_by_id, 'land', record_id): record_id for record_id in ids}
+                futures = {executor.submit(self.get_general_data_by_id, 'land', record_id): record_id for record_id in ids}
 
                 with tqdm(total=len(ids), desc=f"Land - {county}", unit="id") as pbar:
                     for future in as_completed(futures):
@@ -945,7 +973,7 @@ class SOS:
             records_file = f"Naturalization_records.csv"
 
             with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
-                futures = {executor.submit(self.get_land_and_naturalization_data_by_id, 'naturalization', record_id): record_id for record_id in ids}
+                futures = {executor.submit(self.get_general_data_by_id, 'naturalization', record_id): record_id for record_id in ids}
 
                 with tqdm(total=len(ids), desc=f"Naturalization - {county}", unit="id") as pbar:
                     for future in as_completed(futures):
@@ -966,8 +994,85 @@ class SOS:
 
             if county_details:
                 self.export_data(county_details, filename=records_file)
-
             self.export_data([(rid, county) for rid in ids], filename=ids_file)
+
+        # also keep aggregated export for compatibility
+        self.export_data(all_record_ids)
+
+    def run_all_counties_soldiers(self, max_workers_counties=5, max_workers_data=5, max_retries=5):
+        """Fetch Soldiers IDs and details using alphabetical looping (aaa, aab... zzz)"""
+        alphabet = 'abcdefghijklmnopqrstuvwxyz'
+        search_terms = [a + b + c for a in alphabet for b in alphabet for c in alphabet]
+        
+        print(f"\n{'='*60}")
+        print(f"Starting Soldiers scrape with alphabetical looping ({len(search_terms)} combinations)")
+        print(f"{'='*60}\n")
+
+        all_ids_by_term = {}
+        terms_to_process = search_terms[:1]
+        local_params = {'recordsPerPage': '75'}
+        retry_count = 0
+
+        while terms_to_process and retry_count < max_retries:
+            if retry_count > 0:
+                wait_time = (2 ** (retry_count - 1)) * 5
+                time.sleep(wait_time)
+
+            print(f"Fetching IDs for {len(terms_to_process)} terms (Attempt {retry_count + 1})...")
+            # Iterate sequentially to avoid rate limiting on ID fetching
+            for term in tqdm(terms_to_process, desc="Searching", unit="term"):
+                try:
+                    current_data = self.soldiers_data.copy()
+                    current_data['Name'] = term
+                    print('current_data',current_data['Name'])
+                    ids = self.get_all_ids(url=self.soldiers_url, data=current_data, params=local_params)
+                    if ids:
+                        all_ids_by_term[term] = ids
+                        # print(f"✓ Soldiers Term '{term}': {len(ids)} IDs fetched")
+                except Exception as e:
+                    print(f"Error fetching IDs for term '{term}': {e}")
+        
+            terms_to_process = [t for t in terms_to_process if len(all_ids_by_term.get(t, [])) == 0]
+            retry_count += 1
+
+        total_ids = sum(len(ids) for ids in all_ids_by_term.values())
+        print(f"\nTotal Soldiers IDs found: {total_ids}")
+
+        all_record_ids = [(record_id, term) for term, ids in all_ids_by_term.items() for record_id in ids]
+
+        # Fetch details per-term and write CSVs
+        buffer_size = 200
+        for term, ids in all_ids_by_term.items():
+            if not ids:
+                continue
+
+            term_details = []
+            ids_file = f"Soldiers_ids.csv"
+            records_file = f"Soldiers_records.csv"
+
+            with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
+                futures = {executor.submit(self.get_general_data_by_id, 'soldiers', record_id): record_id for record_id in ids}
+
+                with tqdm(total=len(ids), desc=f"Soldiers - {term}", unit="id", leave=False) as pbar:
+                    for future in as_completed(futures):
+                        record_id = futures[future]
+                        try:
+                            rec = future.result()
+                            if isinstance(rec, dict):
+                                rec['search_term'] = term
+                            term_details.append(rec)
+
+                            if len(term_details) >= buffer_size:
+                                self.export_data(term_details, filename=records_file)
+                                term_details = []
+                        except Exception as e:
+                            print(f"Error fetching soldiers detail {record_id} for '{term}': {e}")
+                        finally:
+                            pbar.update(1)
+
+            if term_details:
+                self.export_data(term_details, filename=records_file)
+            self.export_data([(rid, term) for rid in ids], filename=ids_file)
 
         # also keep aggregated export for compatibility
         self.export_data(all_record_ids)
@@ -1027,7 +1132,8 @@ if __name__ == "__main__":
     # sos.run_all_counties_land()
 
     # Scrape naturalization records
-    # print(sos.get_land_and_naturalization_data_by_id('land', '7672'))
-    sos.run_all_counties_naturalization()
+    # print(sos.get_general_data_by_id('land', '7672'))
+    # sos.run_all_counties_naturalization()
 
-    # print(sos.get_land_and_naturalization_data_by_id('naturalization', '8115'))
+    # Scrape Soldiers records with alphabetical looping
+    sos.run_all_counties_soldiers(max_workers_data=10)
