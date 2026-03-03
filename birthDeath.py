@@ -373,7 +373,7 @@ class SOS:
             'Conflict': 'All',
             'Branch': 'all',
             'Submit': 'Submit',
-            '__ncforminfo': 'Exj7qb74KQHG-8KBqqZCAapKWBbfyNx_cVtGY3uM8G_EC7NvS23AWd5wSjcSGTrt1tKN68a5S1jlPq6yc4ePTbaJD1z9uStSS3DsJKbeQVf2fib1VCQlMLeUbLSfQxDmBq6IW40qy89T71JpULlYqc59vD3vXB_3ReIvxkCGSXaQmfvDXxI5iG0iGNftM1zhxKnAGFVH0VrRkIPq9PtIR3cMV0BQBBr9XSx79ReMuQIuKt2t01_uYAlLlUR-rgFjoNpm-jIXyAIIqApG7OuN5mFTGAvYISK47XCBPIqt3WQ=',
+            '__ncforminfo': 'oYW3KaDCZ39y1PkmQT35getIJwJqzujVxPlfEkhxIvX5JklXAvzqvzmgrK8xPACxsqFNQgis4TXqnzUO_Vnh807AyZA9ZoyGbPu6OQZ0FQtzU8X4yA-1qdTawQ_qmFKOvsnUog64wSIzhuSLX0TFTt_NxRsVwOPoEHpRdyiTVkNWjUv5KwWMKIDwVIreEBEoYV3G6Qj2ctTyCSBRP0TeqvIStJ9pcq3cgYcSj-e5CVH_UBMzQH5yUA_0T3zK2LqTgUPeIhW2YkCtMkbC81JGdsUzN2HzzH85WX0r9ASyB4I=',
                 }
  
         self.birth_params = {
@@ -409,7 +409,7 @@ class SOS:
                     headers=self.headers,
                     data=data,
                     timeout=60)
-            # print('resp_post.status_code',resp_post.status_code)
+            print('resp_post.status_code',resp_post.status_code)
 
             if 'No records were found in the Database with this Search Criteria. Please try again.' in resp_post.text:
                 # print("No records found in this county - ",local_params.get('BirthCounty') or local_params.get('CountyName'))
@@ -423,7 +423,7 @@ class SOS:
                 headers=self.headers,
                 timeout=60
             )
-            # print('response.status_code',response.status_code)
+            print('response.status_code',response.status_code)
             if response.status_code == 200:
                 text = response.text
 
@@ -1009,7 +1009,7 @@ class SOS:
         print(f"{'='*60}\n")
 
         all_ids_by_term = {}
-        terms_to_process = search_terms[:1]
+        terms_to_process = search_terms[:]
         local_params = {'recordsPerPage': '75'}
         retry_count = 0
 

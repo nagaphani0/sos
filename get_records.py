@@ -20,7 +20,7 @@ def fetch_data(birth_id):
     except Exception as e:
         return birth_id, {"error": str(e)}
 
-MAX_WORKERS = 10
+MAX_WORKERS = 3
 SAVE_EVERY = 20
 
 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -50,5 +50,5 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 print("💾 Partial save done")
 
 # Final save
-pd.DataFrame(results).to_csv("Birth_results.csv", index=False)
+pd.DataFrame(results).to_csv("Birth_results.psv", index=False)
 print("🎯 Final save completed")
