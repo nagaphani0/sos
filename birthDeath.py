@@ -373,7 +373,7 @@ class SOS:
             'Conflict': 'All',
             'Branch': 'all',
             'Submit': 'Submit',
-            '__ncforminfo': 'oYW3KaDCZ39y1PkmQT35getIJwJqzujVxPlfEkhxIvX5JklXAvzqvzmgrK8xPACxsqFNQgis4TXqnzUO_Vnh807AyZA9ZoyGbPu6OQZ0FQtzU8X4yA-1qdTawQ_qmFKOvsnUog64wSIzhuSLX0TFTt_NxRsVwOPoEHpRdyiTVkNWjUv5KwWMKIDwVIreEBEoYV3G6Qj2ctTyCSBRP0TeqvIStJ9pcq3cgYcSj-e5CVH_UBMzQH5yUA_0T3zK2LqTgUPeIhW2YkCtMkbC81JGdsUzN2HzzH85WX0r9ASyB4I=',
+            '__ncforminfo': 'Exj7qb74KQHG-8KBqqZCAapKWBbfyNx_cVtGY3uM8G_EC7NvS23AWd5wSjcSGTrt1tKN68a5S1jlPq6yc4ePTbaJD1z9uStSS3DsJKbeQVf2fib1VCQlMLeUbLSfQxDmBq6IW40qy89T71JpULlYqc59vD3vXB_3ReIvxkCGSXaQmfvDXxI5iG0iGNftM1zhxKnAGFVH0VrRkIPq9PtIR3cMV0BQBBr9XSx79ReMuQIuKt2t01_uYAlLlUR-rgFjoNpm-jIXyAIIqApG7OuN5mFTGAvYISK47XCBPIqt3WQ=',
                 }
  
         self.birth_params = {
@@ -400,7 +400,7 @@ class SOS:
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
-        # print(data,local_params['PageNumber'])
+        # print(page_number, url, data, local_params)
         page_ids = []
         try:
             resp_post = self.session.post(
@@ -409,73 +409,79 @@ class SOS:
                     headers=self.headers,
                     data=data,
                     timeout=60)
-            print('resp_post.status_code',resp_post.status_code)
+            # print('resp_post.status_code',resp_post.status_code)
 
-            if 'No records were found in the Database with this Search Criteria. Please try again.' in resp_post.text:
+            if 'No records were found in the Database with this Search Criteria. Please try again.' in soup.text:
+                print("No records found in this county - 1")
+                return [], False, False 
+            elif 'No records were found in the Database with this Search Criteria.  Please try again with a different Search Criteria.' in soup.text:
                 # print("No records found in this county - ",local_params.get('BirthCounty') or local_params.get('CountyName'))
-                print("No records found in this county - ",local_params)
-                return [], False, False
+                print("No records found in this county - 2")
+                return [], False, False 
+            else:
+                print("Records Found")
+
+                response = self.session.get(
+                    url + 'Results',
+                    params=local_params,
+                    cookies=self.cookies,
+                    headers=self.headers,
+                    timeout=60
+                )
+                # print('response.status_code',response.status_code)
+                if response.status_code == 200:
+                    text = response.text
+
+                    soup = BeautifulSoup(text, 'html.parser')
+                    has_next =True if soup.find("a", class_="page-link", string="Next") else False
+
+                    links = soup.find_all('a', href=True)
+                    for link in links:
+                        href = link['href']
+                        if 'id=' in href and 'Detail' in href:
+                            # "Detail?id=S176439&conflict=Civil War"
+                            # Detail?id=70782&type=Birth
+                            if 'conflict' in href:
+                                # conflict=href.split('id=')[1].split('&')[1].split('=')[1]
+                                # record_id = href.split('id=')[1].split('&')[0]
+                                record_id = href
+                            else:
+                                record_id = href.split('id=')[1].split('&')[0]
+                            
+                            page_ids.append(record_id)
+                    # print(page_ids)
+
                     
-            response = self.session.get(
-                url + 'Results',
-                params=local_params,
-                cookies=self.cookies,
-                headers=self.headers,
-                timeout=60
-            )
-            print('response.status_code',response.status_code)
-            if response.status_code == 200:
-                text = response.text
+                    # print('page ids',page_ids)
 
-                soup = BeautifulSoup(text, 'html.parser')
-                has_next =True if soup.find("a", class_="page-link", string="Next") else False 
+                    # total_re = re.search(r"class=['\"]TotalDisplayNum['\"][^>]*>(\d+)<", text, re.IGNORECASE)
+                    # if total_re:
+                    #     total_records = int(total_re.group(1))
+                    # else:
+                    #     try:
+                    #         if 'soup' not in locals():
+                    #             soup = BeautifulSoup(text, 'html.parser')
+                    #         total_span = soup.find('span', {'class': 'TotalDisplayNum'})
+                    #         if total_span:
+                    #             total_records = int(total_span.text.strip())
+                    #             print('total records',total_records)
+                    #     except Exception:
+                    #         pass
+                    # print(f"Records:{page_ids}")
 
-                links = soup.find_all('a', href=True)
-                for link in links:
-                    href = link['href']
-                    if 'id=' in href and 'Detail' in href:
-                        # "Detail?id=S176439&conflict=Civil War"
-                        # Detail?id=70782&type=Birth
-                        if 'conflict' in href:
-                            # conflict=href.split('id=')[1].split('&')[1].split('=')[1]
-                            # record_id = href.split('id=')[1].split('&')[0]
-                            record_id = href
-                        else:
-                            record_id = href.split('id=')[1].split('&')[0]
-                        
-                        page_ids.append(record_id)
-                print(page_ids)
+                    print(f"Page {page_number}",end='', flush=True)
+                    return page_ids, has_next, True
 
-                
-                # print('page ids',page_ids)
+                elif response.status_code == 429 or response.status_code == 403 or response.status_code == 502 or response.status_code == 503 and retry_count < max_retries + 20:
+                    wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10)
+                    print(f"Waiting for {wait_time} seconds before retrying...")
+                    time.sleep(wait_time)
+                    return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
 
-                # total_re = re.search(r"class=['\"]TotalDisplayNum['\"][^>]*>(\d+)<", text, re.IGNORECASE)
-                # if total_re:
-                #     total_records = int(total_re.group(1))
-                # else:
-                #     try:
-                #         if 'soup' not in locals():
-                #             soup = BeautifulSoup(text, 'html.parser')
-                #         total_span = soup.find('span', {'class': 'TotalDisplayNum'})
-                #         if total_span:
-                #             total_records = int(total_span.text.strip())
-                #             print('total records',total_records)
-                #     except Exception:
-                #         pass
-                # print(f"Records:{page_ids}")
-
-                print(f"Page {page_number}",end='', flush=True)
-                return page_ids, has_next, True
-
-            elif response.status_code == 429 and retry_count < max_retries + 20:
-                wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10)
-                time.sleep(wait_time)
-                return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
-
-            elif retry_count < max_retries:
-                wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 1)
-                time.sleep(wait_time)
-                return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
+                elif retry_count < max_retries:
+                    wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 1)
+                    time.sleep(wait_time)
+                    return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
             
             return [], False, False
 
@@ -1009,9 +1015,11 @@ class SOS:
         print(f"{'='*60}\n")
 
         all_ids_by_term = {}
-        terms_to_process = search_terms[:]
+        # terms_to_process = search_terms[:]
+        terms_to_process = ['aae']
         local_params = {'recordsPerPage': '75'}
         retry_count = 0
+        seen_ids = set()
 
         while terms_to_process and retry_count < max_retries:
             if retry_count > 0:
@@ -1027,8 +1035,11 @@ class SOS:
                     print('current_data',current_data['Name'])
                     ids = self.get_all_ids(url=self.soldiers_url, data=current_data, params=local_params)
                     if ids:
-                        all_ids_by_term[term] = ids
-                        # print(f"✓ Soldiers Term '{term}': {len(ids)} IDs fetched")
+                        unique_ids = [i for i in ids if i not in seen_ids]
+                        seen_ids.update(unique_ids)
+                        if unique_ids:
+                            all_ids_by_term[term] = unique_ids
+                        # print(f"✓ Soldiers Term '{term}': {len(unique_ids)} IDs fetched")
                 except Exception as e:
                     print(f"Error fetching IDs for term '{term}': {e}")
         
@@ -1136,4 +1147,4 @@ if __name__ == "__main__":
     # sos.run_all_counties_naturalization()
 
     # Scrape Soldiers records with alphabetical looping
-    sos.run_all_counties_soldiers(max_workers_data=10)
+    sos.run_all_counties_soldiers(max_workers_data=5)
