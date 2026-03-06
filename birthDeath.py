@@ -418,7 +418,7 @@ class SOS:
                 print("No records found in this county - 2")
                 return [], False, False
             else:
-                print("Records Found")
+                # print("Records Found")
         
                 response = self.session.get(
                     url + 'Results',
@@ -427,7 +427,7 @@ class SOS:
                     headers=self.headers,
                     timeout=60
                 )
-                print('response.status_code',response.status_code)
+                # print('response.status_code',response.status_code)
                 if response.status_code == 200:
                     text = response.text
 
@@ -448,7 +448,7 @@ class SOS:
                                 record_id = href.split('id=')[1].split('&')[0]
                             
                             page_ids.append(record_id)
-                    print(page_ids)
+                    # print(page_ids)
 
                     
                     # print('page ids',page_ids)
@@ -1003,7 +1003,7 @@ class SOS:
         # also keep aggregated export for compatibility
         self.export_data(all_record_ids)
 
-    def run_all_counties_soldiers(self, max_workers_counties=5, max_workers_data=5, max_retries=5):
+    def run_all_counties_soldiers(self, max_workers_counties=5, max_workers_data=5, max_retries=3):
         """Fetch Soldiers IDs and details using alphabetical looping (aaa, aab... zzz)"""
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
         search_terms = [a + b + c for a in alphabet for b in alphabet for c in alphabet]
@@ -1037,7 +1037,7 @@ class SOS:
             # Fetch details per-term and write CSVs
             term_details = []
             records_file = "Soldiers_records.csv"
-
+            print(f"\nFetching details for term '{term}'...")
             with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
                 futures = {executor.submit(self.get_general_data_by_id, 'soldiers', record_id): record_id for record_id in ids}
 
