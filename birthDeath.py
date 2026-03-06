@@ -1,8 +1,6 @@
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
-# import mysql.connector
-# from mysql.connector import Error
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -10,6 +8,9 @@ import random
 import os
 import re
 import csv
+# import mysql.connector
+# from mysql.connector import Error
+
 try:
     from tqdm import tqdm
 except Exception:
@@ -373,7 +374,7 @@ class SOS:
             'Conflict': 'All',
             'Branch': 'all',
             'Submit': 'Submit',
-            '__ncforminfo': 'Exj7qb74KQHG-8KBqqZCAapKWBbfyNx_cVtGY3uM8G_EC7NvS23AWd5wSjcSGTrt1tKN68a5S1jlPq6yc4ePTbaJD1z9uStSS3DsJKbeQVf2fib1VCQlMLeUbLSfQxDmBq6IW40qy89T71JpULlYqc59vD3vXB_3ReIvxkCGSXaQmfvDXxI5iG0iGNftM1zhxKnAGFVH0VrRkIPq9PtIR3cMV0BQBBr9XSx79ReMuQIuKt2t01_uYAlLlUR-rgFjoNpm-jIXyAIIqApG7OuN5mFTGAvYISK47XCBPIqt3WQ=',
+            '__ncforminfo': 'oYW3KaDCZ39y1PkmQT35getIJwJqzujVxPlfEkhxIvX5JklXAvzqvzmgrK8xPACxsqFNQgis4TXqnzUO_Vnh807AyZA9ZoyGbPu6OQZ0FQtzU8X4yA-1qdTawQ_qmFKOvsnUog64wSIzhuSLX0TFTt_NxRsVwOPoEHpRdyiTVkNWjUv5KwWMKIDwVIreEBEoYV3G6Qj2ctTyCSBRP0TeqvIStJ9pcq3cgYcSj-e5CVH_UBMzQH5yUA_0T3zK2LqTgUPeIhW2YkCtMkbC81JGdsUzN2HzzH85WX0r9ASyB4I=',
                 }
  
         self.birth_params = {
@@ -400,7 +401,7 @@ class SOS:
     def _fetch_page(self, page_number, url, data, params, retry_count=0, max_retries=20):
         local_params = params.copy() if params is not None else {}
         local_params['PageNumber'] = str(page_number)
-        # print(page_number, url, data, local_params)
+        # print(data,local_params['PageNumber'])
         page_ids = []
         try:
             resp_post = self.session.post(
@@ -409,18 +410,16 @@ class SOS:
                     headers=self.headers,
                     data=data,
                     timeout=60)
-            # print('resp_post.status_code',resp_post.status_code)
-
-            if 'No records were found in the Database with this Search Criteria. Please try again.' in soup.text:
+            if 'No records were found in the Database with this Search Criteria. Please try again.' in resp_post.text:
                 print("No records found in this county - 1")
-                return [], False, False 
-            elif 'No records were found in the Database with this Search Criteria.  Please try again with a different Search Criteria.' in soup.text:
+                return [], False, False
+            elif 'No records were found in the Database with this Search Criteria.  Please try again with a different Search Criteria.' in resp_post.text:
                 # print("No records found in this county - ",local_params.get('BirthCounty') or local_params.get('CountyName'))
                 print("No records found in this county - 2")
-                return [], False, False 
+                return [], False, False
             else:
                 print("Records Found")
-
+        
                 response = self.session.get(
                     url + 'Results',
                     params=local_params,
@@ -428,12 +427,12 @@ class SOS:
                     headers=self.headers,
                     timeout=60
                 )
-                # print('response.status_code',response.status_code)
+                print('response.status_code',response.status_code)
                 if response.status_code == 200:
                     text = response.text
 
                     soup = BeautifulSoup(text, 'html.parser')
-                    has_next =True if soup.find("a", class_="page-link", string="Next") else False
+                    has_next =True if soup.find("a", class_="page-link", string="Next") else False 
 
                     links = soup.find_all('a', href=True)
                     for link in links:
@@ -449,7 +448,7 @@ class SOS:
                                 record_id = href.split('id=')[1].split('&')[0]
                             
                             page_ids.append(record_id)
-                    # print(page_ids)
+                    print(page_ids)
 
                     
                     # print('page ids',page_ids)
@@ -472,9 +471,8 @@ class SOS:
                     print(f"Page {page_number}",end='', flush=True)
                     return page_ids, has_next, True
 
-                elif response.status_code == 429 or response.status_code == 403 or response.status_code == 502 or response.status_code == 503 and retry_count < max_retries + 20:
+                elif response.status_code == 429 and retry_count < max_retries + 20:
                     wait_time = 30 + (2 ** min(retry_count, 6)) + random.uniform(0, 10)
-                    print(f"Waiting for {wait_time} seconds before retrying...")
                     time.sleep(wait_time)
                     return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
 
@@ -482,8 +480,8 @@ class SOS:
                     wait_time = (2 ** min(retry_count, 6)) + random.uniform(0, 1)
                     time.sleep(wait_time)
                     return self._fetch_page(page_number, url, data, params, retry_count + 1, max_retries)
-            
-            return [], False, False
+                
+                return [], False, False
 
         except Exception as e:
             if retry_count < max_retries:
@@ -1014,57 +1012,36 @@ class SOS:
         print(f"Starting Soldiers scrape with alphabetical looping ({len(search_terms)} combinations)")
         print(f"{'='*60}\n")
 
-        all_ids_by_term = {}
-        # terms_to_process = search_terms[:]
-        terms_to_process = ['aae']
         local_params = {'recordsPerPage': '75'}
-        retry_count = 0
-        seen_ids = set()
-
-        while terms_to_process and retry_count < max_retries:
-            if retry_count > 0:
-                wait_time = (2 ** (retry_count - 1)) * 5
-                time.sleep(wait_time)
-
-            print(f"Fetching IDs for {len(terms_to_process)} terms (Attempt {retry_count + 1})...")
-            # Iterate sequentially to avoid rate limiting on ID fetching
-            for term in tqdm(terms_to_process, desc="Searching", unit="term"):
-                try:
-                    current_data = self.soldiers_data.copy()
-                    current_data['Name'] = term
-                    print('current_data',current_data['Name'])
-                    ids = self.get_all_ids(url=self.soldiers_url, data=current_data, params=local_params)
-                    if ids:
-                        unique_ids = [i for i in ids if i not in seen_ids]
-                        seen_ids.update(unique_ids)
-                        if unique_ids:
-                            all_ids_by_term[term] = unique_ids
-                        # print(f"✓ Soldiers Term '{term}': {len(unique_ids)} IDs fetched")
-                except Exception as e:
-                    print(f"Error fetching IDs for term '{term}': {e}")
-        
-            terms_to_process = [t for t in terms_to_process if len(all_ids_by_term.get(t, [])) == 0]
-            retry_count += 1
-
-        total_ids = sum(len(ids) for ids in all_ids_by_term.values())
-        print(f"\nTotal Soldiers IDs found: {total_ids}")
-
-        all_record_ids = [(record_id, term) for term, ids in all_ids_by_term.items() for record_id in ids]
-
-        # Fetch details per-term and write CSVs
         buffer_size = 200
-        for term, ids in all_ids_by_term.items():
+
+        for term in search_terms:
+            ids = []
+            try:
+                current_data = self.soldiers_data.copy()
+                current_data['Name'] = term
+                print(f"\nFetching IDs for term '{term}'...")
+                ids = self.get_all_ids(url=self.soldiers_url, data=current_data, params=local_params)
+            except Exception as e:
+                print(f"Error fetching IDs for term '{term}': {e}")
+
             if not ids:
+                print(f"No IDs found for term '{term}'. Moving to next term.")
                 continue
 
+            print(f"✓ Soldiers Term '{term}': {len(ids)} IDs fetched")
+            
+            # Save IDs immediately
+            self.export_data([(rid, term) for rid in ids], filename="Soldiers_ids.csv")
+            
+            # Fetch details per-term and write CSVs
             term_details = []
-            ids_file = f"Soldiers_ids.csv"
-            records_file = f"Soldiers_records.csv"
+            records_file = "Soldiers_records.csv"
 
             with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
                 futures = {executor.submit(self.get_general_data_by_id, 'soldiers', record_id): record_id for record_id in ids}
 
-                with tqdm(total=len(ids), desc=f"Soldiers - {term}", unit="id", leave=False) as pbar:
+                with tqdm(total=len(ids), desc=f"Soldiers Details - {term}", unit="id", leave=False) as pbar:
                     for future in as_completed(futures):
                         record_id = futures[future]
                         try:
@@ -1083,10 +1060,6 @@ class SOS:
 
             if term_details:
                 self.export_data(term_details, filename=records_file)
-            self.export_data([(rid, term) for rid in ids], filename=ids_file)
-
-        # also keep aggregated export for compatibility
-        self.export_data(all_record_ids)
 
 if __name__ == "__main__":
     sos = SOS()
@@ -1147,4 +1120,4 @@ if __name__ == "__main__":
     # sos.run_all_counties_naturalization()
 
     # Scrape Soldiers records with alphabetical looping
-    sos.run_all_counties_soldiers(max_workers_data=5)
+    sos.run_all_counties_soldiers(max_workers_data=3)
