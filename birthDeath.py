@@ -44,7 +44,7 @@ class SOS:
 
         self.cookies = {
             'BNES_ASP.NET_SessionId': '25Rp4LoPJ3UiqGHJf9d///t7o9wnw+Ab8K3T+wSqLzKZNjpYUQdE1CXgOwT4ms7nc0+EdWuEB6rzlzmHj0Z2FRp4nlPDhmXp',
-            'cf_clearance': 'LrA1NNZR8KVm9LGuLUuq8YlspDMYLkt6b9gRpoPSVsY-1770980308-1.2.1.1-eU2rZw_RFZ937bH3I8jGpK0FVGZLKy12icBzEaCrxrobNc7cY23QHgoBtoAueiHiRgkGxlI28QtB3R0QFDSr_gf_e98hgLa.v9MdPq5YxRCBg8ntlKfJ4KdogNSQLFfpWVgtsDaqfY70q2qgIvVtXhb773nflgkDMG6_2XWBe4cpgvhuKSxrUPLczPyPiNSKnjOCxCESJmydBqBD4YqdLJc1gkjx2umqRLHoyWk4HvY',
+            'cf_clearance': 'MnZo.ig8OE4LJxRhoJwkaknxMmdo1M2PgypcLvenDA4-1772805955-1.2.1.1-ZWthctjjKdmrOum7D355JYagwSFOgBT7UXXRDqCBSGLj3dgmfYEtZFcQya1i5Y5aobiYtxGWFRKfaX1q.fiteWrBXb96Bxx1cOAHmqiUzPTuXvEqED_3kuFanyRz0MN71MR6U.d3b394vmax5zkQ.OyKQNUjV9Yvu6DqXiVkrTnEDVx0QPABiNsbpCeIti_jCitSD0utvukuz2cdjWtk5nOUbgCkDqm1eAn7ZjAxfdQ',
         }
         # initialize a requests.Session to reuse connections (faster)
         self.session = requests.Session()
