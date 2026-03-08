@@ -395,6 +395,13 @@ class SOS:
             "NOTE", "source_county"
         ]
         
+        self.soldiers_output_columns = [
+            "id", "search_term", "Name", "Rank", "Conflict", "Side", "Type of Unit", 
+            "Organization", "Name of Unit", "Alternate Unit Name", "Company", 
+            "Period of Service", "Commander", "Note", "Record Group", "Series Title", 
+            "Box", "Reel", "Image"
+        ]
+        
     # pre-compiled regexes (faster than parsing when possible)
     _NEXT_RE = re.compile(r'page-link[^"]*>\s*Next\s*<', re.IGNORECASE)
 
@@ -553,7 +560,16 @@ class SOS:
 
             if th and td:
                 key = th.get_text(" ", strip=True)
-                value = td.get_text(" ", strip=True)
+                
+                # If the key is 'Image', extract the link instead of the button text
+                if key == "Image":
+                    a_tag = td.find("a")
+                    if a_tag and a_tag.has_attr('href'):
+                        value = a_tag['href']
+                    else:
+                        value = td.get_text(" ", strip=True)
+                else:
+                    value = td.get_text(" ", strip=True)
 
                 data[key] = value
 
@@ -1003,19 +1019,26 @@ class SOS:
         # also keep aggregated export for compatibility
         self.export_data(all_record_ids)
 
-    def run_all_counties_soldiers(self, max_workers_counties=5, max_workers_data=5, max_retries=3):
+    def run_all_counties_soldiers(self):
         """Fetch Soldiers IDs and details using alphabetical looping (aaa, aab... zzz)"""
         alphabet = 'abcdefghijklmnopqrstuvwxyz'
-        search_terms = [a + b + c for a in alphabet for b in alphabet for c in alphabet]
-        
+
+        # Create a dictionary mapping each letter to its 3-letter combinations
+        search_series = {
+            letter: [letter + b + c for b in alphabet for c in alphabet]
+            for letter in alphabet
+        }
+
+        # Now you can access each series by its starting letter:
+        # search_series['a'] -> ['aaa', 'aab', 'aac' ... 'azz']
         print(f"\n{'='*60}")
-        print(f"Starting Soldiers scrape with alphabetical looping ({len(search_terms)} combinations)")
+        print(f"Starting Soldiers scrape with alphabetical looping ({len(search_series['a'])} combinations)")
         print(f"{'='*60}\n")
 
         local_params = {'recordsPerPage': '75'}
         buffer_size = 200
 
-        for term in search_terms:
+        for term in search_series['b']:
             ids = []
             try:
                 current_data = self.soldiers_data.copy()
@@ -1034,32 +1057,29 @@ class SOS:
             # Save IDs immediately
             self.export_data([(rid, term) for rid in ids], filename="Soldiers_ids.csv")
             
-            # Fetch details per-term and write CSVs
+            # Fetch details per-term and write CSVs (sequential to ensure data integrity)
             term_details = []
             records_file = "Soldiers_records.csv"
             print(f"\nFetching details for term '{term}'...")
-            with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
-                futures = {executor.submit(self.get_general_data_by_id, 'soldiers', record_id): record_id for record_id in ids}
+            
+            with tqdm(total=len(ids), desc=f"Soldiers Details - {term}", unit="id", leave=False) as pbar:
+                for record_id in ids:
+                    try:
+                        rec = self.get_general_data_by_id('soldiers', record_id)
+                        if isinstance(rec, dict):
+                            rec['search_term'] = term
+                        term_details.append(rec)
 
-                with tqdm(total=len(ids), desc=f"Soldiers Details - {term}", unit="id", leave=False) as pbar:
-                    for future in as_completed(futures):
-                        record_id = futures[future]
-                        try:
-                            rec = future.result()
-                            if isinstance(rec, dict):
-                                rec['search_term'] = term
-                            term_details.append(rec)
-
-                            if len(term_details) >= buffer_size:
-                                self.export_data(term_details, filename=records_file)
-                                term_details = []
-                        except Exception as e:
-                            print(f"Error fetching soldiers detail {record_id} for '{term}': {e}")
-                        finally:
-                            pbar.update(1)
+                        if len(term_details) >= buffer_size:
+                            self.export_data(term_details, filename=records_file, columns=self.soldiers_output_columns)
+                            term_details = []
+                    except Exception as e:
+                        print(f"Error fetching soldiers detail {record_id} for '{term}': {e}")
+                    finally:
+                        pbar.update(1)
 
             if term_details:
-                self.export_data(term_details, filename=records_file)
+                self.export_data(term_details, filename=records_file, columns=self.soldiers_output_columns)
 
 if __name__ == "__main__":
     sos = SOS()
@@ -1120,4 +1140,4 @@ if __name__ == "__main__":
     # sos.run_all_counties_naturalization()
 
     # Scrape Soldiers records with alphabetical looping
-    sos.run_all_counties_soldiers(max_workers_data=3)
+    sos.run_all_counties_soldiers()
