@@ -741,6 +741,37 @@ class SOS:
         # print(f"Appended {len(data)} rows to {filename}")
 
 
+    def process_county_save(self, county,birth_death_data,record_id, max_workers_data=2):
+        # Fetch Details
+        records_file = f"{birth_death_data}_records.csv"
+        buffer = []
+        
+        with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
+            future_to_id = {executor.submit(self.get_birth_data_by_id, record_id, birth_death_data): record_id for record_id in ids}
+            
+        with tqdm(total=len(ids), desc=f"Birth - {county}", unit="id") as pbar:
+            for future in as_completed(future_to_id):
+                try:
+                    rec = future.result()
+                    if isinstance(rec, dict):
+                        rec['source_county'] = county
+                    buffer.append(rec)
+                    
+                    if len(buffer) >= 200:
+                        cols = self.birth_output_columns if birth_death_data == 'Birth' else None
+                        self.export_data(buffer, filename=records_file, columns=cols)
+                        buffer = []
+                except Exception as e:
+                    pass
+                finally:
+                    pbar.update(1)
+        
+        if buffer:
+            cols = self.birth_output_columns if birth_death_data == 'Birth' else None
+            self.export_data(buffer, filename=records_file, columns=cols)
+        
+        print(f"Completed {county}: {len(ids)} records saved.")
+
     def process_county_birth(self, county,birth_death_data, max_workers_data=10, max_retries=5):
         """Process a single county: Fetch IDs, then fetch details, saving incrementally."""
         local_params = self.birth_params.copy()
@@ -1105,6 +1136,8 @@ if __name__ == "__main__":
     # sos.run_all_counties_birth('Death',max_workers_counties=12,
     #                            max_workers_data=3,
     #                            max_retries=7)
+    # sos.process_county_save(county='Douglas',birth_death_data='Death',record_id='17141', max_workers_data=2)
+
 
 
     # Option 2: Scrape Birth records from a single county
@@ -1140,4 +1173,4 @@ if __name__ == "__main__":
     # sos.run_all_counties_naturalization()
 
     # Scrape Soldiers records with alphabetical looping
-    sos.run_all_counties_soldiers()
+    # sos.run_all_counties_soldiers()
