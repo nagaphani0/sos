@@ -455,7 +455,7 @@ class SOS:
                                 record_id = href.split('id=')[1].split('&')[0]
                             
                             page_ids.append(record_id)
-                    # print(page_ids)
+                    print(page_ids)
 
                     
                     # print('page ids',page_ids)
@@ -986,69 +986,85 @@ class SOS:
         print(f"Starting to scrape Naturalization records from all {len(self.naturalization_counties)} counties")
         print(f"{'='*60}\n")
 
-        all_ids_by_county = {}
-        counties_to_process = self.naturalization_counties[:]
+        all_ids_by_county = []
+        # counties_to_process = self.naturalization_counties[:]
+        counties_to_process = 'St. Louis City'
+        yrs = [(year, year) for year in range(1816, 1956)]
         local_params = {}
         local_params['recordsPerPage'] = '75'
         retry_count = 0
-
+        
         while counties_to_process and retry_count < max_retries:
             if retry_count > 0:
                 wait_time = (2 ** (retry_count - 1)) * 5
                 time.sleep(wait_time)
 
             
-            for county in counties_to_process:
+            # for county in counties_to_process:
                 current_data = self.naturalization_data.copy()
-                current_data['CountyName'] = county
-                ids = self.get_all_ids(url=self.naturalization_url, data=current_data, params=local_params)
-                all_ids_by_county[county] = ids
-                print(f"✓ Naturalization County '{county}': {len(ids)} IDs fetched")
+                # current_data['CountyName'] = county
+                current_data['CountyName'] = 'St. Louis City'
+                for (b,e) in yrs[:4]:
+                    print(b,e)
+                    current_data['YearRangeBegin']= b
+                    current_data['YearRangeEnd']=e
+                    
+                    ids = self.get_all_ids(url=self.naturalization_url, data=current_data, params=local_params)
+                    # all_ids_by_county[county] = ids
+                    all_ids_by_county.extend(ids)
+                    print(set(all_ids_by_county))
+                    # print(f"✓ Naturalization County '{county}': {len(ids)} IDs fetched")
+                    print(f"✓ Naturalization County St. Louis City range '{b,e }': {len(ids)} IDs fetched")
         
-            counties_to_process = [c for c in counties_to_process if len(all_ids_by_county.get(c, [])) == 0]
-            retry_count += 1
+            # counties_to_process = [c for c in counties_to_process if len(all_ids_by_county.get(c, [])) == 0]
+            # retry_count += 1
+            # end
 
-        total_ids = sum(len(ids) for ids in all_ids_by_county.values())
-        print(f"\nTotal Naturalization IDs found: {total_ids}")
+        # total_ids = sum(len(ids) for ids in all_ids_by_county.values())
+        
+        print(f"\nTotal Naturalization IDs found: {len(set(all_ids_by_county))}")
 
-        all_record_ids = [(record_id, county) for county, ids in all_ids_by_county.items() for record_id in ids]
+        # all_record_ids = [(record_id, county) for county, ids in all_ids_by_county.items() for record_id in ids]
+        
+        # also keep aggregated export for compatibility
+        # self.export_data(all_record_ids,filename='Naturalization_ids.csv')
+        self.export_data(list(set(all_ids_by_county)),filename='Naturalization_ids.csv')
 
         # Fetch details per-county and write per-county CSVs with a tqdm per county
-        buffer_size = 200
-        for county, ids in all_ids_by_county.items():
-            if not ids:
-                continue
+        # buffer_size = 200
+        # for county, ids in all_ids_by_county.items():
+        #     if not ids:
+        #         continue
 
-            county_details = []
-            ids_file = f"Naturalization_ids.csv"
-            records_file = f"Naturalization_records.csv"
+        #     county_details = []
+        #     ids_file = "Naturalization_ids.csv"
+        #     records_file = "Naturalization_records.csv"
 
-            with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
-                futures = {executor.submit(self.get_general_data_by_id, 'naturalization', record_id): record_id for record_id in ids}
+        #     with ThreadPoolExecutor(max_workers=max_workers_data) as executor:
+        #         futures = {executor.submit(self.get_general_data_by_id, 'naturalization', record_id): record_id for record_id in ids}
 
-                with tqdm(total=len(ids), desc=f"Naturalization - {county}", unit="id") as pbar:
-                    for future in as_completed(futures):
-                        record_id = futures[future]
-                        try:
-                            rec = future.result()
-                            if isinstance(rec, dict):
-                                rec['source_county'] = county
-                            county_details.append(rec)
+        #         with tqdm(total=len(ids), desc=f"Naturalization - {county}", unit="id") as pbar:
+        #             for future in as_completed(futures):
+        #                 record_id = futures[future]
+        #                 try:
+        #                     rec = future.result()
+        #                     if isinstance(rec, dict):
+        #                         rec['source_county'] = county
+        #                     county_details.append(rec)
 
-                            if len(county_details) >= buffer_size:
-                                self.export_data(county_details, filename=records_file)
-                                county_details = []
-                        except Exception as e:
-                            print(f"Error fetching naturalization detail {record_id} for {county}: {e}")
-                        finally:
-                            pbar.update(1)
+        #                     if len(county_details) >= buffer_size:
+        #                         self.export_data(county_details, filename=records_file)
+        #                         county_details = []
+        #                 except Exception as e:
+        #                     print(f"Error fetching naturalization detail {record_id} for {county}: {e}")
+        #                 finally:
+        #                     pbar.update(1)
 
-            if county_details:
-                self.export_data(county_details, filename=records_file)
-            self.export_data([(rid, county) for rid in ids], filename=ids_file)
+        #     if county_details:
+        #         self.export_data(county_details, filename=records_file)
+        #     self.export_data([(rid, county) for rid in ids], filename=ids_file)
 
-        # also keep aggregated export for compatibility
-        self.export_data(all_record_ids)
+        
 
     def run_all_counties_soldiers(self):
         """Fetch Soldiers IDs and details using alphabetical looping (aaa, aab... zzz)"""
@@ -1170,7 +1186,7 @@ if __name__ == "__main__":
 
     # Scrape naturalization records
     # print(sos.get_general_data_by_id('land', '7672'))
-    # sos.run_all_counties_naturalization()
+    sos.run_all_counties_naturalization()
 
     # Scrape Soldiers records with alphabetical looping
     # sos.run_all_counties_soldiers()
